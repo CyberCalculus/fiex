@@ -159,8 +159,8 @@ passed) the renderer falls back to a periodic plain-text log:
 fiex: starting — 12 files, 1.4 GiB
   · 1/12  120 MiB / 1.4 GiB  (212.0 MB/s)  big.iso
   · 1/12  1.4 GiB / 1.4 GiB  (245.7 MB/s)  big.iso
-  ✓ big.iso  copied  in 5.8s
-  ✓ notes.txt  copied  in 0.0s
+  ✓ copied big.iso in 5.8s
+  ✓ copied notes.txt in 0.0s
 fiex: done — 12 files, 1.4 GiB in 6.1s (245.7 MB/s, 0 errors)
 ```
 

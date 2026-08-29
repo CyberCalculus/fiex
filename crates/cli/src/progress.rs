@@ -274,13 +274,13 @@ impl Renderer {
             FileOutcome::Reflinked => "⧉",
         };
         let line = format!(
-            "  {} {} → {}",
+            "  {} {} {} in {}",
             mark,
             outcome_verb(outcome),
             short_path(source),
-            short_path(destination)
+            HumanDuration(elapsed)
         );
-        let _ = (bytes, elapsed);
+        let _ = (bytes, destination);
         if let Some(pb) = &self.overall {
             pb.println(line);
         } else {
