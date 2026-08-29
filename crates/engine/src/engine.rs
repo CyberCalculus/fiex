@@ -198,26 +198,28 @@ impl Engine {
         let (file_tx, file_rx): (Sender<PlanEntry>, Receiver<PlanEntry>) =
             crossbeam_channel::bounded(self.config.parallelism.max(1) * 4);
         let cancel = self.cancel.clone();
-        // Drop our reference to the sender so the workers see the channel
-        // close once the producer task finishes pushing. The producer
-        // below clones the sender for itself.
+        // The producer task below clones the sender; we drop our local
+        // copy here so the channel closes once the producer finishes and
+        // the workers have drained. Without this, the channel would stay
+        // open for the rest of `run()` and workers would block on `recv()`
+        // even after the producer is done.
+        let producer_tx = file_tx.clone();
         drop(file_tx);
 
         // Producer task: pushes all files. If we're cancelled early, we
         // stop pushing and drop the sender so workers exit.
         let producer = {
-            let file_tx = file_tx.clone();
             let cancel = cancel.clone();
             tokio::task::spawn_blocking(move || {
                 for f in files {
                     if cancel.load(Ordering::SeqCst) {
                         break;
                     }
-                    if file_tx.send(f).is_err() {
+                    if producer_tx.send(f).is_err() {
                         break;
                     }
                 }
-                drop(file_tx);
+                drop(producer_tx);
             })
         };
 
