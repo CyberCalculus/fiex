@@ -333,6 +333,65 @@ fn outcome_verb(o: FileOutcome) -> &'static str {
     }
 }
 
+/// Build the interactive prompt callback used when
+/// `--conflict prompt` is set on a TTY. Reads a single line of
+/// input per conflict and returns a [`fiex_engine::PromptDecision`].
+///
+/// Behavior:
+/// - Empty input or "n" / "no"  → Skip this file
+/// - "y" / "yes"                 → Overwrite
+/// - "a" / "all"                 → Overwrite this one AND every
+///                                remaining prompt in the run
+/// - "q" / "quit"                → Cancel the run
+/// - Anything else                → re-ask
+///
+/// Multiple worker threads can hit this concurrently. The first
+/// thing we do is `stdin().lock()`, which serializes them.
+pub fn interactive_prompt() -> fiex_engine::PromptCallback {
+    use fiex_engine::PromptDecision;
+    use std::io::{BufRead, Write};
+    use std::sync::Mutex;
+
+    // A single Mutex around stdin is enough — there's only one fd,
+    // but locking gives us a stable `MutexGuard` to call
+    // `read_line` on, and it serializes any concurrent workers.
+    let stdin = std::io::stdin();
+    let stdin_lock = Mutex::new(stdin.lock());
+
+    Arc::new(
+        move |src: &std::path::Path, dst: &std::path::Path| -> PromptDecision {
+            let mut stdin = stdin_lock.lock().unwrap();
+            loop {
+                eprint!(
+                    "\nfiex: {} -> {} exists. Overwrite? [y/n/a/q]: ",
+                    short_path(src),
+                    short_path(dst),
+                );
+                let _ = std::io::stderr().flush();
+                let mut line = String::new();
+                let n = match stdin.read_line(&mut line) {
+                    Ok(n) => n,
+                    Err(_) => return PromptDecision::Cancel, // broken stdin — bail
+                };
+                if n == 0 {
+                    // EOF (Ctrl-D) on an empty line — treat as "quit"
+                    // so a closed stdin doesn't keep the engine running.
+                    return PromptDecision::Cancel;
+                }
+                match line.trim().to_ascii_lowercase().as_str() {
+                    "y" | "yes" => return PromptDecision::Overwrite,
+                    "n" | "no" | "" => return PromptDecision::Skip,
+                    "a" | "all" => return PromptDecision::All,
+                    "q" | "quit" => return PromptDecision::Cancel,
+                    _ => {
+                        eprintln!("  please answer y, n, a, or q");
+                    }
+                }
+            }
+        },
+    )
+}
+
 fn short_path(p: &std::path::Path) -> String {
     p.file_name()
         .map(|s| s.to_string_lossy().into_owned())

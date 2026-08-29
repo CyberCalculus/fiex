@@ -5,7 +5,7 @@
 //! `events` channel the caller passed in.
 
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI8, AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -16,9 +16,19 @@ use crate::config::Config;
 use crate::error::{EngineError, EngineResult};
 use crate::event::{Event, FileOutcome, LogLevel, Progress};
 use crate::metadata::{copy_xattrs, MetadataSnapshot};
-use crate::policy::{ResolvedTarget, SymlinkPolicy};
+use crate::policy::{PromptDecision, ResolvedTarget, SymlinkPolicy};
 use crate::scan::{scan_tree, ItemKind, ScanOptions, ScannedItem};
 use crate::transfer::{copy_file_with_progress, copy_symlink, move_file, CopyOutcome};
+
+/// Callback used to resolve a destination conflict when the
+/// configured [`ConflictPolicy`] is [`ConflictPolicy::Prompt`].
+///
+/// The callback is invoked synchronously inside a worker thread, so
+/// it must not block on anything other than the user (no async,
+/// no `tokio::sync::Mutex`). The CLI's default impl reads a line
+/// from stdin; the engine's default impl skips the conflict with
+/// a log line.
+pub type PromptCallback = Arc<dyn Fn(&Path, &Path) -> PromptDecision + Send + Sync>;
 
 /// A pre-computed list of (source, destination) pairs for the engine to act
 /// on. Useful for tests and for callers that want to preview a run.
@@ -84,6 +94,14 @@ impl Engine {
         }
     }
 
+    /// Build the default non-interactive prompt callback: any
+    /// `Prompt` conflict is logged and skipped. Use this when stdin
+    /// isn't a TTY, or when the user passed `--conflict` something
+    /// other than `prompt`.
+    pub fn default_prompt_skip() -> PromptCallback {
+        Arc::new(|_src, _dst| PromptDecision::Skip)
+    }
+
     pub fn config(&self) -> &Config {
         &self.config
     }
@@ -126,12 +144,19 @@ impl Engine {
     /// Run the engine. This consumes the engine, drives the scan + transfer
     /// pipeline, and pushes events through `events`. Returns when the plan
     /// completes (or is cancelled).
+    ///
+    /// `prompt` is invoked for every destination conflict when the
+    /// configured [`ConflictPolicy`] is [`ConflictPolicy::Prompt`].
+    /// Pass `Arc::new(|_, _| PromptDecision::Skip)` (the
+    /// `Engine::default_prompt_skip` helper) for non-interactive
+    /// runs.
     pub async fn run(
         self,
         sources: Vec<PathBuf>,
         dest_root: PathBuf,
         mode: TransferMode,
         events: mpsc::UnboundedSender<Event>,
+        prompt: PromptCallback,
     ) -> EngineResult<()> {
         // Move fast-path: a single source on the same filesystem as
         // the destination can be moved by a single rename(2) — same
@@ -249,6 +274,10 @@ impl Engine {
         let files_done = Arc::new(AtomicU64::new(0));
         let next_index = Arc::new(AtomicU64::new(0));
         let errors = Arc::new(AtomicU64::new(0));
+        // 0 = no "all" yet, 1 = the user picked "all" → every remaining
+        // Prompt conflict becomes Overwrite. Set by the prompt callback
+        // through this shared atomic; read by every worker before asking.
+        let prompt_all = Arc::new(AtomicI8::new(0));
         let started = Instant::now();
         let files_total = total_files;
 
@@ -262,6 +291,8 @@ impl Engine {
             let files_done = files_done.clone();
             let next_index = next_index.clone();
             let errors = errors.clone();
+            let prompt = prompt.clone();
+            let prompt_all = prompt_all.clone();
             let h = tokio::task::spawn_blocking(move || {
                 loop {
                     if cancel.load(Ordering::SeqCst) {
@@ -283,6 +314,8 @@ impl Engine {
                         files_total,
                         total_bytes,
                         started,
+                        &prompt,
+                        &prompt_all,
                     ) {
                         errors.fetch_add(1, Ordering::SeqCst);
                         let _ = ev.send(Event::FileError {
@@ -524,6 +557,8 @@ fn process_file(
     files_total: u64,
     total_bytes: u64,
     started: Instant,
+    prompt: &PromptCallback,
+    prompt_all: &Arc<AtomicI8>,
 ) -> EngineResult<()> {
     if matches!(cfg.symlink_policy, SymlinkPolicy::Skip) && matches!(entry.kind, ItemKind::Symlink)
     {
@@ -551,20 +586,44 @@ fn process_file(
             target
         }
         ResolvedTarget::RenameNew { target } => target,
-        ResolvedTarget::Prompt { destination, .. } => {
-            // Non-interactive run: Prompt policy means skip with a log
-            // line. The CLI performs the interactive y/n/a prompt before
-            // running the engine, so this branch only fires when the
-            // user explicitly disabled prompting (e.g. non-TTY without
-            // --prompt).
-            let _ = events.send(Event::Log {
-                level: LogLevel::Info,
-                message: format!(
-                    "prompt mode: skipping {} (no interactive prompt available)",
-                    destination.display()
-                ),
-            });
-            return Ok(());
+        ResolvedTarget::Prompt {
+            source,
+            destination,
+        } => {
+            // If the user already answered "all" earlier in this run,
+            // every remaining conflict becomes an Overwrite. No more
+            // prompts.
+            let decision = if prompt_all.load(Ordering::SeqCst) != 0 {
+                PromptDecision::Overwrite
+            } else {
+                prompt(&source, &destination)
+            };
+            match decision {
+                PromptDecision::Overwrite => destination,
+                PromptDecision::All => {
+                    prompt_all.store(1, Ordering::SeqCst);
+                    destination
+                }
+                PromptDecision::Skip => {
+                    let _ = events.send(Event::Log {
+                        level: LogLevel::Info,
+                        message: format!("skip {}", source.display()),
+                    });
+                    return Ok(());
+                }
+                PromptDecision::Cancel => {
+                    // Flip the engine-wide cancel flag so the workers
+                    // and the producer bail out.
+                    let cancel = events
+                        .send(Event::Log {
+                            level: LogLevel::Warn,
+                            message: "cancelled by user at prompt".into(),
+                        })
+                        .ok();
+                    let _ = cancel;
+                    return Err(EngineError::Cancelled);
+                }
+            }
         }
     };
 
@@ -772,7 +831,13 @@ mod tests {
         let src_root = src.path().to_path_buf();
         let h = tokio::spawn(async move {
             engine
-                .run(vec![src_root], dst_root, TransferMode::Copy, tx)
+                .run(
+                    vec![src_root],
+                    dst_root,
+                    TransferMode::Copy,
+                    tx,
+                    Engine::default_prompt_skip(),
+                )
                 .await
         });
 
@@ -826,7 +891,13 @@ mod tests {
         let src_root = src.path().to_path_buf();
         let h = tokio::spawn(async move {
             engine
-                .run(vec![src_root], dst_root, TransferMode::Move, tx)
+                .run(
+                    vec![src_root],
+                    dst_root,
+                    TransferMode::Move,
+                    tx,
+                    Engine::default_prompt_skip(),
+                )
                 .await
         });
 
@@ -875,7 +946,13 @@ mod tests {
         let src_root = src.path().to_path_buf();
         let h = tokio::spawn(async move {
             engine
-                .run(vec![src_root.clone()], dst_root, TransferMode::Move, tx)
+                .run(
+                    vec![src_root.clone()],
+                    dst_root,
+                    TransferMode::Move,
+                    tx,
+                    Engine::default_prompt_skip(),
+                )
                 .await
         });
 
@@ -938,7 +1015,13 @@ mod tests {
         let src_root = src.path().to_path_buf();
         let h = tokio::spawn(async move {
             engine
-                .run(vec![src_root.clone()], dst_root, TransferMode::Move, tx)
+                .run(
+                    vec![src_root.clone()],
+                    dst_root,
+                    TransferMode::Move,
+                    tx,
+                    Engine::default_prompt_skip(),
+                )
                 .await
         });
         while let Some(ev) = rx.recv().await {
@@ -960,6 +1043,120 @@ mod tests {
                 "inode mismatch for {path_before:?} vs {path_after:?}"
             );
         }
+    }
+
+    /// When the policy is `Prompt` and the user answers `Overwrite`
+    /// for every conflict, the engine should overwrite an existing
+    /// destination file with the source content.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn prompt_callback_overwrite_resolves_conflict() {
+        let src = tempdir().unwrap();
+        let dst = tempdir().unwrap();
+        write_random(&src.path().join("a.bin"), 2048);
+        // Destination already has a same-named file with different
+        // content — this is the conflict the prompt resolves.
+        std::fs::write(dst.path().join("a.bin"), vec![0xAAu8; 4096]).unwrap();
+
+        let cfg = Config {
+            buffer_size: 1024,
+            parallelism: 1,
+            verify: crate::config::VerifyMode::All,
+            conflict_policy: crate::policy::ConflictPolicy::Prompt,
+            try_reflink: false,
+            ..Config::default()
+        };
+        let engine = Engine::new(cfg).unwrap();
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        let src_root = src.path().to_path_buf();
+        let dst_root = dst.path().to_path_buf();
+        // Always say "overwrite" via the prompt callback.
+        let prompt: PromptCallback = std::sync::Arc::new(|_src, _dst| PromptDecision::Overwrite);
+        let h = tokio::spawn(async move {
+            engine
+                .run(vec![src_root], dst_root, TransferMode::Copy, tx, prompt)
+                .await
+        });
+        while let Some(ev) = rx.recv().await {
+            if matches!(ev, Event::Done { .. }) {
+                break;
+            }
+        }
+        h.await.unwrap().unwrap();
+
+        // The destination now matches the source.
+        let src_bytes = std::fs::read(src.path().join("a.bin")).unwrap();
+        let dst_bytes = std::fs::read(dst.path().join("a.bin")).unwrap();
+        assert_eq!(src_bytes, dst_bytes);
+        assert_eq!(dst_bytes.len(), 2048);
+    }
+
+    /// When the prompt callback returns `Skip`, the destination is
+    /// left alone.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn prompt_callback_skip_leaves_destination_alone() {
+        let src = tempdir().unwrap();
+        let dst = tempdir().unwrap();
+        write_random(&src.path().join("a.bin"), 2048);
+        let original = vec![0xAAu8; 4096];
+        std::fs::write(dst.path().join("a.bin"), &original).unwrap();
+
+        let cfg = Config {
+            buffer_size: 1024,
+            parallelism: 1,
+            conflict_policy: crate::policy::ConflictPolicy::Prompt,
+            try_reflink: false,
+            ..Config::default()
+        };
+        let engine = Engine::new(cfg).unwrap();
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        let src_root = src.path().to_path_buf();
+        let dst_root = dst.path().to_path_buf();
+        let prompt: PromptCallback = std::sync::Arc::new(|_src, _dst| PromptDecision::Skip);
+        let h = tokio::spawn(async move {
+            engine
+                .run(vec![src_root], dst_root, TransferMode::Copy, tx, prompt)
+                .await
+        });
+        while let Some(ev) = rx.recv().await {
+            if matches!(ev, Event::Done { .. }) {
+                break;
+            }
+        }
+        h.await.unwrap().unwrap();
+
+        let dst_bytes = std::fs::read(dst.path().join("a.bin")).unwrap();
+        assert_eq!(
+            dst_bytes, original,
+            "destination must not be touched on skip"
+        );
+    }
+
+    /// When the prompt callback returns `Cancel`, the engine returns
+    /// `EngineError::Cancelled` and the rest of the plan is dropped.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn prompt_callback_cancel_aborts_run() {
+        let src = tempdir().unwrap();
+        let dst = tempdir().unwrap();
+        write_random(&src.path().join("a.bin"), 2048);
+        write_random(&src.path().join("b.bin"), 2048);
+        std::fs::write(dst.path().join("a.bin"), vec![0xAAu8; 4096]).unwrap();
+
+        let cfg = Config {
+            buffer_size: 1024,
+            parallelism: 1,
+            conflict_policy: crate::policy::ConflictPolicy::Prompt,
+            try_reflink: false,
+            ..Config::default()
+        };
+        let engine = Engine::new(cfg).unwrap();
+        let (tx, _rx) = mpsc::unbounded_channel();
+        let src_root = src.path().to_path_buf();
+        let dst_root = dst.path().to_path_buf();
+        let prompt: PromptCallback = std::sync::Arc::new(|_src, _dst| PromptDecision::Cancel);
+        let result = engine
+            .run(vec![src_root], dst_root, TransferMode::Copy, tx, prompt)
+            .await;
+        assert!(matches!(result, Err(EngineError::Cancelled)));
     }
 
     /// Collect `(relative_path, inode)` pairs for every regular file

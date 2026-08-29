@@ -15,10 +15,21 @@ pub enum ConflictPolicy {
     RenameOld,
     /// Pick a unique name with a numeric suffix (e.g. `file (1).bin`).
     RenameNew,
-    /// Ask the user. The CLI's non-interactive runner treats this as `Skip`
-    /// with a log line so the run never blocks on stdin.
-    #[default]
+    /// Ask the user. The CLI's interactive runner prompts on a TTY and
+    /// otherwise treats it as `Skip` (with a log line) so a piped run
+    /// never blocks.
     Prompt,
+}
+
+impl Default for ConflictPolicy {
+    fn default() -> Self {
+        // Default to `Overwrite` so a fresh `Config` and a
+        // serde-loaded `Config` agree: missing keys don't quietly
+        // make the engine a no-op. Users who want a prompt have to
+        // opt in via `--conflict prompt` or the `conflict_policy`
+        // field.
+        Self::Overwrite
+    }
 }
 
 impl ConflictPolicy {
@@ -40,6 +51,21 @@ impl ConflictPolicy {
             },
         }
     }
+}
+
+/// What the user answered when asked about a destination conflict.
+///
+/// The engine's `run` accepts an optional prompt callback; if the
+/// user picks `All`, the engine flips the in-flight run to
+/// "overwrite everything remaining" so it doesn't keep asking.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PromptDecision {
+    Overwrite,
+    Skip,
+    /// Treat every remaining conflict in this run as Overwrite.
+    All,
+    /// Cancel the run.
+    Cancel,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -115,8 +141,11 @@ mod tests {
     }
 
     #[test]
-    fn conflict_policy_default_is_prompt() {
-        assert_eq!(ConflictPolicy::default(), ConflictPolicy::Prompt);
+    fn conflict_policy_default_is_overwrite() {
+        // Default flipped from `Prompt` to `Overwrite` in v0.2.3 so
+        // a fresh `Config` and a serde-loaded one with a missing
+        // `conflict_policy` key agree (and the run actually copies).
+        assert_eq!(ConflictPolicy::default(), ConflictPolicy::Overwrite);
     }
 
     #[test]

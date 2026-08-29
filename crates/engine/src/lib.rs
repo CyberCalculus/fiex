@@ -31,7 +31,7 @@ pub mod scan;
 pub mod transfer;
 
 pub use config::{Config, VerifyMode};
-pub use engine::{Engine, EngineHandle, Plan, TransferMode};
+pub use engine::{Engine, EngineHandle, Plan, PromptCallback, TransferMode};
 pub use error::{EngineError, EngineResult};
 pub use event::{Event, FileOutcome, LogLevel, Progress};
-pub use policy::{ConflictPolicy, SymlinkPolicy};
+pub use policy::{ConflictPolicy, PromptDecision, SymlinkPolicy};

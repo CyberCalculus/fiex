@@ -18,9 +18,9 @@ the terminal, with a plain log-line fallback for pipes, CI, and `NO_COLOR`.
   appends only the remaining suffix. If it doesn't match, the temp is
   discarded and the copy restarts from zero.
 - **Conflict policies**: `overwrite` (default), `skip`, `rename-old`,
-  `rename-new`, `prompt`. `prompt` is non-interactive in this build
-  (logs a skip line and continues); pick a different policy for
-  scripts that need a specific behavior on collision.
+  `rename-new`, `prompt`. `prompt` asks the user for every conflict
+  when stdin is a TTY (`[y/n/a/q]` — yes, no, all, quit); on a
+  non-interactive stdin it logs a skip line and continues.
 - **Cross-filesystem CoW** via `copy_file_range` (Linux + Android bionic) with
   a `FICLONE` ioctl fallback, then a buffered copy if reflink isn't supported.
 - **Symlink handling**: `preserve`, `follow`, `skip`. With `follow`, symlink
@@ -166,6 +166,19 @@ fiex: done — 12 files, 1.4 GiB in 6.1s (245.7 MB/s, 0 errors)
 ```
 
 Ctrl-c cancels the run cleanly and exits with code 130.
+
+When `--conflict prompt` is set on a TTY, the engine prompts per
+conflict:
+
+```
+fiex: foo.bin -> foo.bin exists. Overwrite? [y/n/a/q]:
+```
+
+`y` overwrites this one file, `n` skips it, `a` overwrites this and
+every remaining conflict in the run, `q` cancels the whole run. An
+empty line defaults to "no". On a non-TTY (e.g. piped into another
+process), the prompt is silently skipped and conflicts fall back to
+the same log-and-skip behavior as before.
 
 ## Architecture notes
 
