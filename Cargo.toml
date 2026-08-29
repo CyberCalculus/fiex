@@ -26,6 +26,10 @@ crossbeam-channel = "0.5.16"
 # the release workflow.
 blake3 = "1.8.7"
 
+# xattr (extended attributes). Linux-only at the use sites, but the
+# crate builds on macOS too — fine to keep at workspace level.
+xattr = "1.6.1"
+
 # FFI declarations for syscall wrappers (copy_file_range, ioctl, etc.)
 # The `libc` crate ships a proper `link` attribute on the crate itself,
 # which propagates to downstream binaries. Using a bare `extern "C"`
