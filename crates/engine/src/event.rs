@@ -27,7 +27,12 @@ pub enum FileOutcome {
 }
 
 /// Aggregate progress snapshot — emitted frequently while a transfer is
-/// active so the dashboard can render a live throughput / ETA.
+/// active so the renderer can show a live throughput / ETA.
+///
+/// `current_file` and `current_file_written` are `Some` while a file is
+/// in flight (so the renderer can show a per-file bar); they're `None`
+/// between files. `files_total` is filled in by the engine once known
+/// (the engine sends `files_total` once via `Event::Started`).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Progress {
     pub bytes_done: u64,
@@ -36,6 +41,15 @@ pub struct Progress {
     pub files_total: u64,
     pub current_speed_bps: f64,
     pub eta: Option<Duration>,
+    /// Display name of the file currently being copied (basename).
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub current_file: Option<String>,
+    /// Bytes written to the current file so far.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub current_file_written: Option<u64>,
+    /// Total size of the current file (for per-file percent).
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub current_file_total: Option<u64>,
 }
 
 impl Progress {

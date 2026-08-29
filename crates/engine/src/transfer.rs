@@ -9,15 +9,20 @@
 //!  2. Otherwise, open a `File` for the destination, then copy in chunks
 //!     from the source. A `.tmp` sibling is used so the destination never
 //!     observes a partial file.
-//!  3. After the copy, fsync the temp file, optionally verify with BLAKE3,
-//!     then atomic-rename onto the real destination.
+//!  3. While copying, the bytes are streamed through `HashingWriter` so
+//!     verification adds zero extra passes over the data (Bug 5).
+//!  4. If the destination's `.tmp` already exists from a prior interrupted
+//!     run, its kept prefix is byte-compared against the start of `src`.
+//!     If it matches, we seek past the kept bytes and only copy the
+//!     remaining suffix (Bug 2). If it doesn't match, we discard `.tmp`
+//!     and start over.
 
 use std::fs::{self, File, OpenOptions};
-use std::io::{BufReader, Read, Write};
+use std::io::{Read, Seek, SeekFrom, Write};
 use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 
-use crate::checksum::hash_reader;
+use crate::checksum::{HashingWriter, CHUNK};
 use crate::error::{EngineError, EngineResult};
 
 /// The on-disk extension used for partial copies.
@@ -44,6 +49,12 @@ pub enum CopyOutcome {
     AlreadyCurrent,
 }
 
+/// Callback fired every time `buffered_copy` writes a chunk. Used by the
+/// engine to emit live per-file progress (Bug 6). `bytes_written` is
+/// the cumulative number of bytes written to the destination in this
+/// file so far.
+pub type ProgressFn<'a> = &'a mut dyn FnMut(u64);
+
 /// Copy `src` to `dst` atomically.
 ///
 /// Writes go to `dst + ".fiex.tmp"` and on success the temp file is
@@ -55,6 +66,19 @@ pub fn copy_file(
     buf_size: usize,
     try_reflink: bool,
     verify: bool,
+) -> EngineResult<CopyOutcome> {
+    copy_file_with_progress(src, dst, buf_size, try_reflink, verify, &mut |_| {})
+}
+
+/// Same as [`copy_file`], but takes a progress callback. Use this when
+/// you want live per-file updates (e.g. updating a progress bar).
+pub fn copy_file_with_progress(
+    src: &Path,
+    dst: &Path,
+    buf_size: usize,
+    try_reflink: bool,
+    verify: bool,
+    on_progress: ProgressFn<'_>,
 ) -> EngineResult<CopyOutcome> {
     if same_path(src, dst) {
         return Err(EngineError::SameSourceDest(dst.to_path_buf()));
@@ -86,13 +110,16 @@ pub fn copy_file(
         resumed = true;
     }
 
-    // 2. Buffered copy.
-    buffered_copy(src, &tmp, buf_size).map_err(|e| EngineError::io(src, e))?;
+    // 2. Buffered copy (also handles resume + hash-while-copying).
+    let (written, src_hash, dst_hash) = buffered_copy(src, &tmp, buf_size, verify, on_progress)
+        .map_err(|e| EngineError::io(src, e))?;
+    let _ = written;
 
-    // 3. Optional verify.
+    // 3. Verify (Bug 5: zero extra passes — we already hashed both
+    // sides while copying).
     if verify {
-        let src_hash = hash_reader(BufReader::new(File::open(src)?))?;
-        let dst_hash = hash_reader(BufReader::new(File::open(&tmp)?))?;
+        let src_hash = src_hash.expect("verify requested");
+        let dst_hash = dst_hash.expect("verify requested");
         if src_hash != dst_hash {
             // Leave the .tmp in place so the user can inspect.
             return Err(EngineError::ChecksumMismatch {
@@ -123,21 +150,125 @@ pub fn copy_file(
     }
 }
 
-fn buffered_copy(src: &Path, dst: &Path, buf_size: usize) -> std::io::Result<u64> {
+/// Buffered copy with optional resume and hash-while-copying.
+///
+/// Returns `(bytes_written, Option<src_hash>, Option<dst_hash>)`. The
+/// hash options are `Some` iff `verify` is true. If the existing
+/// `.tmp`'s kept prefix doesn't match the start of the source, we
+/// discard it and restart from zero (Bug 2).
+fn buffered_copy(
+    src: &Path,
+    dst: &Path,
+    buf_size: usize,
+    verify: bool,
+    on_progress: ProgressFn<'_>,
+) -> std::io::Result<(u64, Option<String>, Option<String>)> {
+    let src_size = fs::metadata(src)?.len();
+    let existing = fs::metadata(dst).ok().map(|m| m.len());
+
+    // Bug 2: byte-compare the kept prefix against the start of the
+    // source. If the prefix doesn't match, throw it away and restart.
+    let start_offset: u64 = match existing {
+        Some(n) if n <= src_size => {
+            if n == 0 {
+                0
+            } else {
+                match verify_prefix(src, dst, n) {
+                    Ok(()) => n,
+                    Err(_e) => {
+                        let _ = fs::remove_file(dst);
+                        0
+                    }
+                }
+            }
+        }
+        Some(_n) => {
+            // tmp is larger than the source — never valid; discard.
+            let _ = fs::remove_file(dst);
+            0
+        }
+        None => 0,
+    };
+
+    // Open source and seek past the kept prefix (if any).
     let mut in_file = File::open(src)?;
-    let mut out_file = OpenOptions::new().append(true).open(dst)?;
+    if start_offset > 0 {
+        in_file.seek(SeekFrom::Start(start_offset))?;
+    }
+
+    // Open destination in append mode.
+    let out_file = OpenOptions::new().append(true).open(dst)?;
+
+    // Bug 5: hash the source as we read it, and stream writes through
+    // a HashingWriter so the destination's digest is computed during
+    // the same pass. Zero extra I/O for verify.
+    let mut total = start_offset;
     let mut buf = vec![0u8; buf_size];
-    let mut total = 0u64;
-    loop {
-        let n = in_file.read(&mut buf)?;
-        if n == 0 {
+
+    if verify {
+        let mut src_hasher = blake3::Hasher::new();
+        let mut hashing = HashingWriter::new(out_file);
+        loop {
+            let n = in_file.read(&mut buf)?;
+            if n == 0 {
+                break;
+            }
+            src_hasher.update(&buf[..n]);
+            hashing.write_all(&buf[..n])?;
+            total += n as u64;
+            on_progress(total);
+        }
+        hashing.flush()?;
+        let (_inner, dst_hash) = hashing.finalize_hex();
+        let src_hash = src_hasher.finalize().to_hex().to_string();
+        Ok((total, Some(src_hash), Some(dst_hash)))
+    } else {
+        let mut out_file = out_file;
+        loop {
+            let n = in_file.read(&mut buf)?;
+            if n == 0 {
+                break;
+            }
+            out_file.write_all(&buf[..n])?;
+            total += n as u64;
+            on_progress(total);
+        }
+        out_file.flush()?;
+        Ok((total, None, None))
+    }
+}
+
+/// Compare the first `n` bytes of `src` against the existing contents of
+/// `dst`. Returns `Ok(())` on match, `Err(_)` on mismatch.
+fn verify_prefix(src: &Path, dst: &Path, n: u64) -> std::io::Result<()> {
+    if n == 0 {
+        return Ok(());
+    }
+    let mut src_f = File::open(src)?;
+    let mut dst_f = File::open(dst)?;
+    let mut s_buf = vec![0u8; CHUNK];
+    let mut d_buf = vec![0u8; CHUNK];
+    let mut remaining = n;
+    while remaining > 0 {
+        let take = (remaining as usize).min(s_buf.len());
+        let s_n = std::io::Read::by_ref(&mut src_f)
+            .take(take as u64)
+            .read(&mut s_buf[..take])?;
+        let d_n = std::io::Read::by_ref(&mut dst_f)
+            .take(take as u64)
+            .read(&mut d_buf[..take])?;
+        if s_n != d_n || s_buf[..s_n] != d_buf[..d_n] {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "kept prefix does not match source",
+            ));
+        }
+        if s_n == 0 {
             break;
         }
-        out_file.write_all(&buf[..n])?;
-        total += n as u64;
+        remaining -= s_n as u64;
     }
-    out_file.flush()?;
-    Ok(total)
+    Ok(())
 }
 
 fn same_path(a: &Path, b: &Path) -> bool {
@@ -259,6 +390,7 @@ pub fn move_file(
     src: &Path,
     dst: &Path,
     buf_size: usize,
+    try_reflink: bool,
     verify: bool,
 ) -> EngineResult<CopyOutcome> {
     if same_path(src, dst) {
@@ -275,7 +407,8 @@ pub fn move_file(
         }
         Err(_e) => { /* fall through to copy + unlink */ }
     }
-    let outcome = copy_file(src, dst, buf_size, true, verify)?;
+    // Bug 3: thread the user's try_reflink through, not hardcoded true.
+    let outcome = copy_file(src, dst, buf_size, try_reflink, verify)?;
     // Safe unlink — if this fails the user is left with both copies, which
     // is the safe direction (we don't want to lose data).
     fs::remove_file(src).map_err(|e| EngineError::io(src, e))?;
@@ -284,7 +417,8 @@ pub fn move_file(
 
 fn verify_after_move(dst: &Path) -> EngineResult<()> {
     // `src` no longer exists after rename — verify by re-reading dst.
-    let _ = hash_reader(BufReader::new(File::open(dst)?))?;
+    use std::io::BufReader;
+    let _ = crate::checksum::hash_reader(BufReader::new(File::open(dst)?))?;
     Ok(())
 }
 
@@ -369,13 +503,144 @@ mod tests {
         assert!(matches!(err, EngineError::SameSourceDest(_)));
     }
 
+    /// Bug 2 regression: when the .tmp file is a partial prefix of the
+    /// source, the resume path must:
+    ///  - verify the kept prefix matches the start of the source
+    ///  - seek the source past the kept bytes
+    ///  - append only the remaining suffix
+    /// The previous (broken) implementation opened the destination in
+    /// append mode and streamed the whole source from byte 0, producing
+    /// an oversized, corrupted file.
+    #[test]
+    fn resume_appends_only_remainder() {
+        let dir = tempdir().unwrap();
+        let src = dir.path().join("a");
+        let dst = dir.path().join("b");
+        // Make source deterministic: 8 KiB of a known pattern.
+        let total = 8 * 1024;
+        let pattern: Vec<u8> = (0..256u8).collect();
+        {
+            let mut f = File::create(&src).unwrap();
+            for _ in 0..(total / 256) {
+                f.write_all(&pattern).unwrap();
+            }
+        }
+        // Pre-populate the .tmp with the FIRST 3 KiB of the source
+        // (a genuine partial prefix, not empty).
+        let tmp = tmp_path(&dst);
+        {
+            let mut f = File::create(&tmp).unwrap();
+            f.write_all(&pattern.repeat(12)).unwrap(); // 3072 bytes
+        }
+        let before_src = std::fs::read(&src).unwrap();
+        let before_tmp = std::fs::read(&tmp).unwrap();
+        assert_eq!(before_tmp.len(), 3072);
+        assert_eq!(&before_tmp[..], &before_src[..3072]);
+
+        let outcome = copy_file(&src, &dst, 4096, true, true).unwrap();
+        // We expect Resumed because the .tmp existed on entry.
+        assert_eq!(outcome, CopyOutcome::Resumed);
+
+        let after = std::fs::read(&dst).unwrap();
+        assert_eq!(after, before_src, "destination must equal source exactly");
+        assert_eq!(after.len(), total);
+        assert!(!tmp.exists(), "tmp must be cleaned up after rename");
+    }
+
+    /// Bug 2 regression: when the .tmp prefix doesn't match the
+    /// source, the resume path must discard the bad tmp and restart
+    /// from zero, not produce a corrupted file.
+    #[test]
+    fn resume_discards_corrupt_tmp_and_restarts() {
+        let dir = tempdir().unwrap();
+        let src = dir.path().join("a");
+        let dst = dir.path().join("b");
+        // Source is a known pattern.
+        let pattern: Vec<u8> = (0..256u8).collect();
+        {
+            let mut f = File::create(&src).unwrap();
+            for _ in 0..32 {
+                f.write_all(&pattern).unwrap();
+            }
+        }
+        // .tmp is a CORRUPT prefix — different bytes from the source.
+        let tmp = tmp_path(&dst);
+        std::fs::write(&tmp, vec![0u8; 1024]).unwrap();
+
+        copy_file(&src, &dst, 4096, true, true).unwrap();
+
+        let after = std::fs::read(&dst).unwrap();
+        let src_bytes = std::fs::read(&src).unwrap();
+        assert_eq!(
+            after, src_bytes,
+            "destination must equal source after restart"
+        );
+    }
+
+    /// Bug 3 regression: move_file must honor the caller's
+    /// try_reflink=false (it used to hardcode true).
+    #[test]
+    fn move_file_honors_try_reflink_false() {
+        // We can't observe reflink attempts directly, but we can
+        // assert the API takes the parameter and the move still
+        // completes correctly with reflink disabled.
+        let dir = tempdir().unwrap();
+        let src = dir.path().join("a");
+        let dst = dir.path().join("b");
+        write_random(&src, 4096);
+        let expected = std::fs::read(&src).unwrap();
+        move_file(&src, &dst, 4096, false, true).unwrap();
+        assert!(!src.exists());
+        assert_eq!(std::fs::read(&dst).unwrap(), expected);
+    }
+
+    /// Bug 5 regression: copy with verify=true must not add any
+    /// extra I/O — the destination hash is computed during the
+    /// streaming write. We check the resulting file is correct and
+    /// the source is read at most once (it would be impossible to
+    /// verify with zero extra I/O otherwise). The simpler check is
+    /// that the copy still verifies correctly; a correct hash + no
+    /// extra read is exercised in `hashing_writer_agrees_with_one_shot`
+    /// in checksum.rs.
+    #[test]
+    fn copy_with_verify_still_produces_correct_output() {
+        let dir = tempdir().unwrap();
+        let src = dir.path().join("a");
+        let dst = dir.path().join("b");
+        write_random(&src, 32 * 1024);
+        copy_file(&src, &dst, 4096, false, true).unwrap();
+        assert_eq!(std::fs::read(&src).unwrap(), std::fs::read(&dst).unwrap());
+    }
+
+    /// Bug 6 regression: progress callback fires with the running
+    /// byte count as the file is copied. We assert that the maximum
+    /// value seen is at least the file size, and that the final value
+    /// equals the file size.
+    #[test]
+    fn progress_callback_reports_inflight_bytes() {
+        let dir = tempdir().unwrap();
+        let src = dir.path().join("a");
+        let dst = dir.path().join("b");
+        write_random(&src, 16 * 1024);
+        let mut max_seen = 0u64;
+        let mut last_seen = 0u64;
+        let _ = copy_file_with_progress(&src, &dst, 1024, false, false, &mut |w| {
+            last_seen = w;
+            if w > max_seen {
+                max_seen = w;
+            }
+        });
+        assert_eq!(last_seen, 16 * 1024);
+        assert!(max_seen >= 16 * 1024);
+    }
+
     #[test]
     fn move_file_renames_within_dir() {
         let dir = tempdir().unwrap();
         let src = dir.path().join("a");
         let dst = dir.path().join("b");
         write_random(&src, 100);
-        move_file(&src, &dst, 64 * 1024, false).unwrap();
+        move_file(&src, &dst, 64 * 1024, true, false).unwrap();
         assert!(!src.exists());
         assert!(dst.exists());
     }

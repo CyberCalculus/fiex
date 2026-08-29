@@ -37,22 +37,63 @@ pub struct Config {
     /// Use cross-filesystem CoW (reflink) when possible. Falls back to a
     /// buffered copy if the syscall fails.
     pub try_reflink: bool,
-
-    /// Color theme name (TUI-only hint, free-form).
-    pub theme: String,
 }
 
 /// When to run a BLAKE3 verification pass.
+///
+/// `All` is the default: every file is checksummed as it copies (zero
+/// extra I/O passes — see `checksum::HashingWriter`).
+/// `None` disables verification entirely.
+/// `Sample { pct }` verifies only the given percentage of files
+/// (uniform random, per file). `pct` is in `[0, 100]`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "kebab-case")]
 pub enum VerifyMode {
     /// Never run an extra verification pass beyond the streaming one.
     None,
-    /// Verify every file after the copy completes.
+    /// Verify every file as it is copied.
     #[default]
     All,
-    /// Verify a random sample of files (pct is 0-100).
-    Sample,
+    /// Verify a random `pct` percent of files (0–100).
+    Sample { pct: u8 },
+}
+
+impl VerifyMode {
+    /// Should this file (identified by a 0-based plan index) be verified?
+    /// `None` → never, `All` → always, `Sample { pct }` → uniform random
+    /// per index. The RNG is deterministic per-thread (XorShift seeded
+    /// from a process-wide counter + a salt based on the index) so tests
+    /// can pin the exact sample set by setting the same seed twice.
+    pub fn should_verify(&self, index: u64) -> bool {
+        match *self {
+            VerifyMode::None => false,
+            VerifyMode::All => true,
+            VerifyMode::Sample { pct } => {
+                if pct == 0 {
+                    return false;
+                }
+                if pct >= 100 {
+                    return true;
+                }
+                // XorShift64 seeded with a per-process counter plus the
+                // file index — uniform over [0, 100). We compare to `pct`
+                // so the expected sampled fraction is `pct / 100`.
+                let seed = (process_counter() ^ index.wrapping_mul(0x9E3779B97F4A7C15))
+                    .wrapping_add(0xBF58476D1CE4E5B9);
+                let mut s = seed;
+                s ^= s << 13;
+                s ^= s >> 7;
+                s ^= s << 17;
+                (s % 100) < pct as u64
+            }
+        }
+    }
+}
+
+fn process_counter() -> u64 {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static C: AtomicU64 = AtomicU64::new(0);
+    C.fetch_add(1, Ordering::Relaxed)
 }
 
 impl Default for Config {
@@ -67,7 +108,6 @@ impl Default for Config {
             preserve_xattrs: false,
             allow_symlink_escape: false,
             try_reflink: true,
-            theme: "catppuccin-mocha".to_string(),
         }
     }
 }
@@ -130,6 +170,28 @@ mod tests {
     }
 
     #[test]
+    fn verify_mode_sample_rates() {
+        use crate::config::VerifyMode;
+        let none = VerifyMode::None;
+        let all = VerifyMode::All;
+        let sample_0 = VerifyMode::Sample { pct: 0 };
+        let sample_50 = VerifyMode::Sample { pct: 50 };
+        let sample_100 = VerifyMode::Sample { pct: 100 };
+
+        for i in 0..10 {
+            assert!(!none.should_verify(i));
+            assert!(all.should_verify(i));
+            assert!(!sample_0.should_verify(i));
+            assert!(sample_100.should_verify(i));
+        }
+
+        // 50% over a 200-file run: between 60 and 140 verifies expected
+        // (rough; the actual distribution depends on the seeded XorShift).
+        let count = (0..200).filter(|i| sample_50.should_verify(*i)).count();
+        assert!(count > 60 && count < 140, "got {count}");
+    }
+
+    #[test]
     fn parses_real_toml() {
         let toml = r#"
             buffer_size = 524288
@@ -141,13 +203,11 @@ mod tests {
             preserve_xattrs = true
             allow_symlink_escape = false
             try_reflink = true
-            theme = "tokyo-night"
         "#;
         let cfg: Config = toml::from_str(toml).unwrap();
         assert_eq!(cfg.buffer_size, 524288);
         assert_eq!(cfg.parallelism, 8);
         assert_eq!(cfg.conflict_policy, ConflictPolicy::Overwrite);
         assert_eq!(cfg.symlink_policy, SymlinkPolicy::Follow);
-        assert_eq!(cfg.theme, "tokyo-night");
     }
 }

@@ -56,6 +56,17 @@ jobs:
       - name: Run unit tests
         run: cargo test --workspace --all-features
 
+      - name: Detect dead dependencies
+        # cargo-machete walks every .rs file and flags any
+        # workspace dep that isn't actually used. Guards against the
+        # same drift the audit on 2026-08-29 caught (walkdir, glob,
+        # rustix, once_cell, cfg-if, serde-json, nucleo-matcher,
+        # ratatui, crossterm, futures were all declared but never
+        # imported).
+        run: |
+          cargo install --locked cargo-machete
+          cargo machete --workspace
+
   msrv:
     name: MSRV build
     runs-on: ubuntu-latest

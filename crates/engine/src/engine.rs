@@ -95,6 +95,7 @@ impl Engine {
         for src in sources {
             let canon_root = canonical_root(src)?;
             let opts = ScanOptions {
+                root: Arc::new(canon_root.clone()),
                 symlinks: self.config.symlink_policy,
                 forbid_symlink_escape: !self.config.allow_symlink_escape,
             };
@@ -230,8 +231,10 @@ impl Engine {
         let ev = events.clone();
         let bytes_done = Arc::new(AtomicU64::new(0));
         let files_done = Arc::new(AtomicU64::new(0));
+        let next_index = Arc::new(AtomicU64::new(0));
         let errors = Arc::new(AtomicU64::new(0));
         let started = Instant::now();
+        let files_total = total_files;
 
         let mut worker_handles = Vec::new();
         for _ in 0..parallelism {
@@ -241,6 +244,7 @@ impl Engine {
             let ev = ev.clone();
             let bytes_done = bytes_done.clone();
             let files_done = files_done.clone();
+            let next_index = next_index.clone();
             let errors = errors.clone();
             let h = tokio::task::spawn_blocking(move || {
                 loop {
@@ -251,13 +255,16 @@ impl Engine {
                         Ok(e) => e,
                         Err(_) => break, // channel closed → all producers done
                     };
+                    let index = next_index.fetch_add(1, Ordering::SeqCst);
                     if let Err(e) = process_file(
+                        index,
                         &entry,
                         mode,
                         &cfg,
                         &ev,
                         &bytes_done,
                         &files_done,
+                        files_total,
                         total_bytes,
                         started,
                     ) {
@@ -301,12 +308,14 @@ pub enum TransferMode {
 
 #[allow(clippy::too_many_arguments)]
 fn process_file(
+    index: u64,
     entry: &PlanEntry,
     mode: TransferMode,
     cfg: &Config,
     events: &mpsc::UnboundedSender<Event>,
     bytes_done: &Arc<AtomicU64>,
     files_done: &Arc<AtomicU64>,
+    files_total: u64,
     total_bytes: u64,
     started: Instant,
 ) -> EngineResult<()> {
@@ -337,11 +346,17 @@ fn process_file(
         }
         ResolvedTarget::RenameNew { target } => target,
         ResolvedTarget::Prompt { destination, .. } => {
-            // In headless mode this is treated as Skip. The TUI replaces
-            // this with a real interactive prompt before run.
+            // Non-interactive run: Prompt policy means skip with a log
+            // line. The CLI performs the interactive y/n/a prompt before
+            // running the engine, so this branch only fires when the
+            // user explicitly disabled prompting (e.g. non-TTY without
+            // --prompt).
             let _ = events.send(Event::Log {
                 level: LogLevel::Info,
-                message: format!("prompt mode: headless, skipping {}", destination.display()),
+                message: format!(
+                    "prompt mode: skipping {} (no interactive prompt available)",
+                    destination.display()
+                ),
             });
             return Ok(());
         }
@@ -361,19 +376,51 @@ fn process_file(
     };
 
     let started_file = Instant::now();
+    // Bug 4: VerifyMode::Sample is now an actual per-file decision.
+    let should_verify = cfg.verify.should_verify(index);
+    // Bug 6: thread a progress callback so the per-file bar updates
+    // live, not just at completion.
+    let current_file_name = entry
+        .source
+        .file_name()
+        .map(|s| s.to_string_lossy().into_owned())
+        .unwrap_or_else(|| entry.source.display().to_string());
+    let ev_for_cb = events.clone();
+    let bytes_done_for_cb = Arc::clone(bytes_done);
+    let files_done_for_cb = Arc::clone(files_done);
+    let total_bytes_for_cb = total_bytes;
+    let started_for_cb = started;
+    let mut on_progress = |written_this_file: u64| {
+        // Note: bytes_done is only updated at file END (after this
+        // callback returns), so we pass the in-flight "written_this_file"
+        // through current_file_written; the renderer combines the two.
+        let _ = ev_for_cb.send(Event::Progress(snapshot_progress_inflight(
+            &bytes_done_for_cb,
+            &files_done_for_cb,
+            files_total,
+            total_bytes_for_cb,
+            started_for_cb,
+            current_file_name.clone(),
+            written_this_file,
+            entry.size,
+        )));
+    };
+
     let outcome = match mode {
-        TransferMode::Copy => copy_file(
+        TransferMode::Copy => copy_file_with_progress(
             &entry.source,
             &target,
             cfg.buffer_size,
             cfg.try_reflink,
-            matches!(cfg.verify, crate::config::VerifyMode::All),
+            should_verify,
+            &mut on_progress,
         )?,
         TransferMode::Move => move_file(
             &entry.source,
             &target,
             cfg.buffer_size,
-            matches!(cfg.verify, crate::config::VerifyMode::All),
+            cfg.try_reflink,
+            should_verify,
         )?,
     };
     let elapsed = started_file.elapsed();
@@ -405,6 +452,7 @@ fn process_file(
     let _ = events.send(Event::Progress(snapshot_progress(
         bytes_done,
         files_done,
+        files_total,
         total_bytes,
         started,
     )));
@@ -414,6 +462,7 @@ fn process_file(
 fn snapshot_progress(
     bytes_done: &Arc<AtomicU64>,
     files_done: &Arc<AtomicU64>,
+    files_total: u64,
     total_bytes: u64,
     started: Instant,
 ) -> Progress {
@@ -435,10 +484,30 @@ fn snapshot_progress(
         bytes_done: bytes,
         bytes_total: total_bytes,
         files_done: files,
-        files_total: 0,
+        files_total,
         current_speed_bps: speed,
         eta,
+        current_file: None,
+        current_file_written: None,
+        current_file_total: None,
     }
+}
+
+fn snapshot_progress_inflight(
+    bytes_done: &Arc<AtomicU64>,
+    files_done: &Arc<AtomicU64>,
+    files_total: u64,
+    total_bytes: u64,
+    started: Instant,
+    current_file: String,
+    current_file_written: u64,
+    current_file_total: u64,
+) -> Progress {
+    let mut p = snapshot_progress(bytes_done, files_done, files_total, total_bytes, started);
+    p.current_file = Some(current_file);
+    p.current_file_written = Some(current_file_written);
+    p.current_file_total = Some(current_file_total);
+    p
 }
 
 fn canonical_root(src: &Path) -> EngineResult<PathBuf> {
