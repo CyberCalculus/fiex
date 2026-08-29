@@ -113,8 +113,7 @@ pub fn copy_xattrs(src: &Path, dst: &Path) -> std::io::Result<usize> {
         // xattr's public API takes `AsRef<OsStr>` for the attribute name.
         // `OsStrExt::from_bytes` is well-defined for raw OS bytes (which
         // is what `OsString::as_encoded_bytes` already returned).
-        let name_os =
-            std::os::unix::ffi::OsStrExt::from_bytes(name.as_encoded_bytes());
+        let name_os = std::os::unix::ffi::OsStrExt::from_bytes(name.as_encoded_bytes());
         let value = match xattr::get(src, name_os) {
             Ok(Some(v)) => v,
             Ok(None) => continue,
