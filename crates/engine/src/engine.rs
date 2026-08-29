@@ -198,6 +198,10 @@ impl Engine {
         let (file_tx, file_rx): (Sender<PlanEntry>, Receiver<PlanEntry>) =
             crossbeam_channel::bounded(self.config.parallelism.max(1) * 4);
         let cancel = self.cancel.clone();
+        // Drop our reference to the sender so the workers see the channel
+        // close once the producer task finishes pushing. The producer
+        // below clones the sender for itself.
+        drop(file_tx);
 
         // Producer task: pushes all files. If we're cancelled early, we
         // stop pushing and drop the sender so workers exit.
