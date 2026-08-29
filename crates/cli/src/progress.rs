@@ -351,56 +351,6 @@ fn per_file_style() -> ProgressStyle {
         .progress_chars("=>-")
 }
 
-/// Ask the user a single line of input from stdin. Used for the
-/// Prompt conflict policy when run interactively.
-pub fn prompt_line(prompt: &str) -> Result<Option<String>> {
-    use std::io::{BufRead, Write};
-    let stdin = std::io::stdin();
-    let mut handle = stdin.lock();
-    eprint!("{prompt} ");
-    let _ = std::io::stderr().flush();
-    let mut line = String::new();
-    let n = handle.read_line(&mut line)?;
-    if n == 0 {
-        Ok(None)
-    } else {
-        Ok(Some(line.trim().to_string()))
-    }
-}
-
-/// Resolved prompt result.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum PromptAnswer {
-    Yes,
-    No,
-    All,
-    Quit,
-}
-
-pub fn ask_conflict(
-    source: &std::path::Path,
-    destination: &std::path::Path,
-) -> Result<PromptAnswer> {
-    loop {
-        let prompt = format!(
-            "\nfiex: {} exists. Overwrite? [y/n/a/q]: ",
-            destination.display()
-        );
-        let _ = source;
-        let line = match prompt_line(&prompt)? {
-            Some(l) => l,
-            None => return Ok(PromptAnswer::Quit),
-        };
-        match line.to_lowercase().as_str() {
-            "y" | "yes" => return Ok(PromptAnswer::Yes),
-            "n" | "no" => return Ok(PromptAnswer::No),
-            "a" | "all" => return Ok(PromptAnswer::All),
-            "q" | "quit" => return Ok(PromptAnswer::Quit),
-            _ => eprintln!("  please answer y, n, a, or q"),
-        }
-    }
-}
-
 /// Spawn a tokio task that listens for SIGINT and triggers the given
 /// `EngineHandle::cancel()`.
 pub fn install_ctrl_c_handler(handle: Arc<fiex_engine::EngineHandle>) {
