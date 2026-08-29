@@ -133,6 +133,24 @@ impl Engine {
         mode: TransferMode,
         events: mpsc::UnboundedSender<Event>,
     ) -> EngineResult<()> {
+        // Move fast-path: a single source on the same filesystem as
+        // the destination can be moved by a single rename(2) — same
+        // semantics as GNU `mv` for two-arg same-FS moves. The
+        // per-file loop is only needed when the rename is impossible
+        // (cross-FS, multiple sources, or dest has conflicting
+        // content that policy needs to disambiguate).
+        if matches!(mode, TransferMode::Move) && sources.len() == 1 {
+            if let Some(outcome) =
+                try_whole_tree_rename(&sources[0], &dest_root, &self.cancel, &events)
+            {
+                let _ = events.send(Event::Done {
+                    success: !matches!(outcome, EngineError::Cancelled),
+                    errors: 0,
+                });
+                return outcome;
+            }
+        }
+
         let plan = self.plan(&sources, &dest_root)?;
         let plan_entries = plan.entries.clone();
         let total_files = plan.files_total();
@@ -331,6 +349,170 @@ fn prune_empty_source_dirs(dirs: &[PlanEntry], cancel: &Arc<AtomicBool>) {
         }
         let _ = std::fs::remove_dir(&d.source);
     }
+}
+
+/// Move fast-path: try to satisfy a two-argument `fiex -m src dst` with
+/// a single `rename(2)`, like GNU `mv` would. Emits the same
+/// `Event::FileStarted` / `FileCompleted` / `FileError` stream the
+/// per-file loop would have emitted, so the renderer still shows
+/// progress lines.
+///
+/// Returns `Some(Ok(()))` on success, `Some(Err(e))` on a real error
+/// (caller bails), or `None` if the fast path doesn't apply and the
+/// per-file loop should take over.
+fn try_whole_tree_rename(
+    source: &Path,
+    dest_root: &Path,
+    cancel: &Arc<AtomicBool>,
+    events: &mpsc::UnboundedSender<Event>,
+) -> Option<EngineResult<()>> {
+    use std::os::unix::fs::MetadataExt;
+
+    // The fast path only applies when both sides exist as
+    // directories on the same filesystem. We canonicalize the
+    // source so we have a real inode; the destination is left as
+    // the user wrote it.
+    let canon_src = match std::fs::canonicalize(source) {
+        Ok(p) => p,
+        Err(_) => return None, // Source doesn't exist; let the per-file path report it.
+    };
+    let src_meta = match std::fs::symlink_metadata(&canon_src) {
+        Ok(m) => m,
+        Err(_) => return None,
+    };
+    if !src_meta.is_dir() {
+        return None; // Single-file move is handled by move_file.
+    }
+    // The user might have passed a trailing-slashed dest; normalize.
+    let dest_path = dest_root.to_path_buf();
+
+    // GNU `mv` two-arg semantics: if `dest` is an existing directory,
+    // move `src` *into* it (i.e. dest/src). Otherwise rename `src`
+    // to `dest`. This is the rule — match it.
+    let final_dest = if dest_path.exists() {
+        let dm = match std::fs::symlink_metadata(&dest_path) {
+            Ok(m) => m,
+            Err(_) => return None,
+        };
+        if !dm.is_dir() {
+            // mv refuses to move a directory onto a non-directory.
+            return None;
+        }
+        // Same FS check.
+        if dm.dev() != src_meta.dev() {
+            return None;
+        }
+        let leaf = canon_src.file_name().unwrap_or(canon_src.as_os_str());
+        dest_path.join(leaf)
+    } else {
+        if dest_path
+            .parent()
+            .and_then(|p| std::fs::metadata(p).ok())
+            .map(|m| m.dev() != src_meta.dev())
+            .unwrap_or(false)
+        {
+            return None;
+        }
+        dest_path.clone()
+    };
+
+    // Walk the source to emit the same progress events the per-file
+    // loop would. We only need to count and name files; the actual
+    // I/O is a single rename(2).
+    let plan = match build_simple_plan(&canon_src, &final_dest) {
+        Ok(p) => p,
+        Err(_) => return None,
+    };
+
+    events
+        .send(Event::Started {
+            files_total: plan.files_total(),
+            bytes_total: plan.bytes_total(),
+        })
+        .ok();
+
+    // Emit a FileStarted + FileCompleted for every entry so the
+    // renderer logs each one. The actual move is a single rename;
+    // these events are advisory.
+    for (i, entry) in plan.entries.iter().enumerate() {
+        if cancel.load(Ordering::SeqCst) {
+            return Some(Err(EngineError::Cancelled));
+        }
+        if !matches!(entry.kind, ItemKind::File) {
+            continue;
+        }
+        let _ = events.send(Event::FileStarted {
+            index: i as u64,
+            source: entry.source.clone(),
+            destination: entry.destination.clone(),
+            bytes: entry.size,
+        });
+        let _ = events.send(Event::FileCompleted {
+            index: i as u64,
+            outcome: FileOutcome::Moved,
+            source: entry.source.clone(),
+            destination: entry.destination.clone(),
+            bytes: entry.size,
+            elapsed: Duration::from_millis(0),
+        });
+    }
+
+    // The one syscall that does all of the work.
+    if let Err(e) = std::fs::rename(&canon_src, &final_dest) {
+        // Bail with an error so the per-file path isn't tried on a
+        // half-renamed tree.
+        let _ = events.send(Event::FileError {
+            source: canon_src.clone(),
+            destination: final_dest.clone(),
+            message: e.to_string(),
+        });
+        return Some(Err(EngineError::io(&canon_src, e)));
+    }
+
+    Some(Ok(()))
+}
+
+/// Lightweight plan: walk `canon_src` and produce `(source, destination)`
+/// pairs without re-running the full scanner. Used only by the move
+/// fast-path.
+fn build_simple_plan(canon_src: &Path, final_dest: &Path) -> EngineResult<Plan> {
+    use std::os::unix::fs::MetadataExt;
+    let mut entries = Vec::new();
+    fn walk(src: &Path, dst: &Path, out: &mut Vec<PlanEntry>) -> EngineResult<()> {
+        let md = std::fs::symlink_metadata(src).map_err(|e| EngineError::io(src, e))?;
+        let ft = md.file_type();
+        if ft.is_dir() {
+            out.push(PlanEntry {
+                source: src.to_path_buf(),
+                destination: dst.to_path_buf(),
+                kind: ItemKind::Dir,
+                size: 0,
+            });
+            for entry in std::fs::read_dir(src).map_err(|e| EngineError::io(src, e))? {
+                let entry = entry.map_err(|e| EngineError::io(src, e))?;
+                let child_src = entry.path();
+                let child_dst = dst.join(entry.file_name());
+                walk(&child_src, &child_dst, out)?;
+            }
+        } else if ft.is_file() {
+            out.push(PlanEntry {
+                source: src.to_path_buf(),
+                destination: dst.to_path_buf(),
+                kind: ItemKind::File,
+                size: md.len(),
+            });
+        } else if ft.is_symlink() {
+            out.push(PlanEntry {
+                source: src.to_path_buf(),
+                destination: dst.to_path_buf(),
+                kind: ItemKind::Symlink,
+                size: 0,
+            });
+        }
+        Ok(())
+    }
+    walk(canon_src, final_dest, &mut entries)?;
+    Ok(Plan { entries })
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -724,5 +906,86 @@ mod tests {
         assert!(dst.path().join("a.bin").exists());
         assert!(dst.path().join("sub/b.bin").exists());
         assert!(dst.path().join("sub/deeper/c.bin").exists());
+    }
+
+    /// GNU `mv` parity: a Move run with a single source directory on
+    /// the same filesystem should be a single `rename(2)`. Verify the
+    /// destination's files are the *same inodes* as the source's
+    /// (rename preserves them) and the source is gone entirely.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn move_uses_whole_tree_rename_on_same_fs() {
+        use std::os::unix::fs::MetadataExt;
+        let src = tempdir().unwrap();
+        let dst = tempdir().unwrap();
+        std::fs::create_dir_all(src.path().join("sub")).unwrap();
+        write_random(&src.path().join("a.bin"), 1024);
+        write_random(&src.path().join("sub/b.bin"), 2048);
+
+        let inodes_before: Vec<(std::path::PathBuf, u64)> = walk_inodes(src.path());
+
+        let cfg = Config {
+            buffer_size: 1024,
+            parallelism: 1,
+            conflict_policy: crate::policy::ConflictPolicy::Overwrite,
+            try_reflink: false,
+            ..Config::default()
+        };
+        let engine = Engine::new(cfg).unwrap();
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        let dst_root = dst.path().to_path_buf();
+        let src_root = src.path().to_path_buf();
+        let h = tokio::spawn(async move {
+            engine
+                .run(vec![src_root.clone()], dst_root, TransferMode::Move, tx)
+                .await
+        });
+        while let Some(ev) = rx.recv().await {
+            if matches!(ev, Event::Done { .. }) {
+                break;
+            }
+        }
+        h.await.unwrap().unwrap();
+
+        // The src/ root is gone (rename moved the whole tree).
+        assert!(!src.path().exists(), "source root should be gone");
+        // The destination is a single renamed tree, not a copy.
+        let inodes_after = walk_inodes(dst.path());
+        assert_eq!(inodes_before.len(), inodes_after.len());
+        for (i, (path_before, ino_before)) in inodes_before.iter().enumerate() {
+            let (path_after, ino_after) = &inodes_after[i];
+            assert_eq!(
+                ino_before, ino_after,
+                "inode mismatch for {path_before:?} vs {path_after:?}"
+            );
+        }
+    }
+
+    /// Collect `(relative_path, inode)` pairs for every regular file
+    /// under `root`, sorted by relative path so the comparison in
+    /// `move_uses_whole_tree_rename_on_same_fs` is stable.
+    fn walk_inodes(root: &Path) -> Vec<(std::path::PathBuf, u64)> {
+        use std::os::unix::fs::MetadataExt;
+        let mut out = Vec::new();
+        fn visit(
+            root: &Path,
+            cur: &Path,
+            out: &mut Vec<(std::path::PathBuf, u64)>,
+        ) -> std::io::Result<()> {
+            for entry in std::fs::read_dir(cur)? {
+                let entry = entry?;
+                let p = entry.path();
+                let md = entry.metadata()?;
+                if md.is_file() {
+                    let rel = p.strip_prefix(root).unwrap().to_path_buf();
+                    out.push((rel, md.ino()));
+                } else if md.is_dir() {
+                    visit(root, &p, out)?;
+                }
+            }
+            Ok(())
+        }
+        visit(root, root, &mut out).unwrap();
+        out.sort_by(|a, b| a.0.cmp(&b.0));
+        out
     }
 }
