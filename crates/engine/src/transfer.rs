@@ -505,9 +505,9 @@ mod tests {
 
     /// Bug 2 regression: when the .tmp file is a partial prefix of the
     /// source, the resume path must:
-    ///  - verify the kept prefix matches the start of the source
-    ///  - seek the source past the kept bytes
-    ///  - append only the remaining suffix
+    ///   - verify the kept prefix matches the start of the source
+    ///   - seek the source past the kept bytes
+    ///   - append only the remaining suffix
     /// The previous (broken) implementation opened the destination in
     /// append mode and streamed the whole source from byte 0, producing
     /// an oversized, corrupted file.
@@ -518,7 +518,7 @@ mod tests {
         let dst = dir.path().join("b");
         // Make source deterministic: 8 KiB of a known pattern.
         let total = 8 * 1024;
-        let pattern: Vec<u8> = (0..256u8).collect();
+        let pattern: Vec<u8> = (0..=255u8).collect();
         {
             let mut f = File::create(&src).unwrap();
             for _ in 0..(total / 256) {
@@ -556,7 +556,7 @@ mod tests {
         let src = dir.path().join("a");
         let dst = dir.path().join("b");
         // Source is a known pattern.
-        let pattern: Vec<u8> = (0..256u8).collect();
+        let pattern: Vec<u8> = (0..=255u8).collect();
         {
             let mut f = File::create(&src).unwrap();
             for _ in 0..32 {
