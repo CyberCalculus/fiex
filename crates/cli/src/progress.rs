@@ -274,9 +274,10 @@ impl Renderer {
             FileOutcome::Reflinked => "⧉",
         };
         let line = format!(
-            "  {mark} {}  {}",
-            short_path(source),
+            "  {} {} → {}",
+            mark,
             outcome_verb(outcome),
+            short_path(source),
             short_path(destination)
         );
         let _ = (bytes, elapsed);
