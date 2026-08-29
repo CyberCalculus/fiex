@@ -206,7 +206,7 @@ const libc_ENOTSUP: i32 = 95;
 const libc_EINVAL: i32 = 22;
 
 #[cfg(target_os = "linux")]
-extern "C" {
+unsafe extern "C" {
     #[link_name = "copy_file_range"]
     fn libc_copy_file_range(
         srcfd: i32,

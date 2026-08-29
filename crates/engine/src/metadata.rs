@@ -109,20 +109,16 @@ pub fn copy_xattrs(src: &Path, dst: &Path) -> std::io::Result<usize> {
     };
     let mut count = 0;
     for name in names {
-        // `OsString::as_encoded_bytes` is byte-level (raw OS bytes).
-        // We feed them into a CString — values that contain a NUL are
-        // rejected and we skip that attribute.
-        let name_cstr = match std::ffi::CString::new(name.as_encoded_bytes()) {
-            Ok(s) => s,
-            Err(_) => continue,
-        };
-        let value = match xattr::get(src, name_cstr.as_c_str()) {
+        // xattr's public API takes `AsRef<OsStr>` for the attribute name.
+        // `OsStr::from_bytes` is unsafe but well-defined for raw OS bytes
+        // (which is what `OsString::as_encoded_bytes` already returned).
+        let name_os = unsafe { std::ffi::OsStr::from_bytes(name.as_encoded_bytes()) };
+        let value = match xattr::get(src, name_os) {
             Ok(Some(v)) => v,
             Ok(None) => continue,
             Err(_) => continue,
         };
-        // setxattr with the full attribute name (user.* or system.*).
-        if xattr::set(dst, name_cstr.as_c_str(), &value).is_ok() {
+        if xattr::set(dst, name_os, &value).is_ok() {
             count += 1;
         }
     }
