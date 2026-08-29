@@ -157,7 +157,7 @@ fn try_reflink_copy(src: &Path, dst: &Path) -> std::io::Result<bool> {
         .write(true)
         .create_new(true)
         .mode(0o644)
-        .custom_flags(libc_O_NOFOLLOW)
+        .custom_flags(LIBC_O_NOFOLLOW)
         .open(dst)?;
     // copy_file_range first; if that returns EXDEV / ENOTSUP, try FICLONE.
     let copied = unsafe {
@@ -228,8 +228,11 @@ unsafe extern "C" {
 
 #[cfg(target_os = "linux")]
 unsafe fn libc_ficlone(dst: i32, src: i32) -> i32 {
-    // SAFETY: caller (FIE) ensures both fds are valid open file descriptors.
-    fiex_ficlone(dst, src)
+    // SAFETY: caller (the engine) ensures both fds are valid open file
+    // descriptors and that the destination is on a filesystem that
+    // supports reflinks. On failure the ioctl returns -1 and we report
+    // it as "not supported" up the stack.
+    unsafe { fiex_ficlone(dst, src) }
 }
 
 // ---------- Move ----------
