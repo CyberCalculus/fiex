@@ -212,11 +212,17 @@ fn buffered_copy(
     );
 
     // Open source and seek past the kept prefix (if any).
+    eprintln!(
+        "DBG: about to File::open(src={:?}) src.exists()={} parent.exists()={}",
+        src,
+        src.exists(),
+        src.parent().map(|p| p.exists()).unwrap_or(false)
+    );
     let mut in_file = match File::open(src) {
         Ok(f) => f,
         Err(e) => {
             eprintln!(
-                "DBG: File::open(src={:?}) failed: {e} (parent exists={})",
+                "DBG: File::open(src={:?}) failed: {e} (parent now exists={})",
                 src,
                 src.parent().map(|p| p.exists()).unwrap_or(false)
             );
