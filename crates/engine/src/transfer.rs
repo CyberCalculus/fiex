@@ -160,13 +160,7 @@ fn try_reflink_copy(src: &Path, dst: &Path) -> std::io::Result<bool> {
         .custom_flags(LIBC_O_NOFOLLOW)
         .open(dst)?;
     // copy_file_range first; if that returns EXDEV / ENOTSUP, try FICLONE.
-    let copied = linux_android_copy_file_range(
-        s.as_raw_fd(),
-        -1,
-        d.as_raw_fd(),
-        -1,
-        usize::MAX,
-    );
+    let copied = linux_android_copy_file_range(s.as_raw_fd(), -1, d.as_raw_fd(), -1, usize::MAX);
     if copied > 0 {
         d.sync_all()?;
         return Ok(true);
