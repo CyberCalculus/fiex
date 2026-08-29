@@ -484,6 +484,9 @@ mod tests {
             parallelism: 2,
             verify: crate::config::VerifyMode::All,
             conflict_policy: crate::policy::ConflictPolicy::Overwrite,
+            // Force a regular copy so the FileOutcome is deterministic
+            // across filesystems (CI runners may support reflink).
+            try_reflink: false,
             ..Config::default()
         };
         let engine = Engine::new(cfg).unwrap();
@@ -537,6 +540,7 @@ mod tests {
             buffer_size: 1024,
             parallelism: 1,
             conflict_policy: crate::policy::ConflictPolicy::Overwrite,
+            try_reflink: false,
             ..Config::default()
         };
         let engine = Engine::new(cfg).unwrap();
