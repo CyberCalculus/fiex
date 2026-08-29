@@ -837,8 +837,12 @@ mod tests {
         }
         h.await.unwrap().unwrap();
 
+        // GNU mv semantics: when the destination is an existing
+        // directory, the source is moved *under* it. So `a.bin` ends
+        // up at dst/<src_basename>/a.bin.
+        let src_basename = src.path().file_name().unwrap();
         assert!(!src.path().join("a.bin").exists());
-        assert!(dst.path().join("a.bin").exists());
+        assert!(dst.path().join(src_basename).join("a.bin").exists());
     }
 
     /// Bug fix regression: a Move run over a nested source tree must
@@ -882,6 +886,8 @@ mod tests {
         }
         h.await.unwrap().unwrap();
 
+        // GNU mv semantics: source goes *under* the destination.
+        let moved_root = dst.path().join(src.path().file_name().unwrap());
         // No files left anywhere in the source.
         for p in [
             src.path().join("a.bin"),
@@ -899,10 +905,10 @@ mod tests {
         ] {
             assert!(!p.exists(), "empty source dir should be pruned: {p:?}");
         }
-        // The dst tree is intact.
-        assert!(dst.path().join("a.bin").exists());
-        assert!(dst.path().join("sub/b.bin").exists());
-        assert!(dst.path().join("sub/deeper/c.bin").exists());
+        // The dst tree is intact (under moved_root).
+        assert!(moved_root.join("a.bin").exists());
+        assert!(moved_root.join("sub/b.bin").exists());
+        assert!(moved_root.join("sub/deeper/c.bin").exists());
     }
 
     /// GNU `mv` parity: a Move run with a single source directory on
