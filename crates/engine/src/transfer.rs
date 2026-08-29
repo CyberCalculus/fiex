@@ -160,16 +160,13 @@ fn try_reflink_copy(src: &Path, dst: &Path) -> std::io::Result<bool> {
         .custom_flags(LIBC_O_NOFOLLOW)
         .open(dst)?;
     // copy_file_range first; if that returns EXDEV / ENOTSUP, try FICLONE.
-    let copied = unsafe {
-        libc_copy_file_range(
-            s.as_raw_fd(),
-            std::ptr::null_mut(),
-            d.as_raw_fd(),
-            std::ptr::null_mut(),
-            usize::MAX,
-            0,
-        )
-    };
+    let copied = linux_android_copy_file_range(
+        s.as_raw_fd(),
+        -1,
+        d.as_raw_fd(),
+        -1,
+        usize::MAX,
+    );
     if copied > 0 {
         d.sync_all()?;
         return Ok(true);
@@ -209,25 +206,45 @@ const LIBC_ENOTSUP: i32 = 95;
 #[cfg(unix)]
 const LIBC_EINVAL: i32 = 22;
 
+// `libc::copy_file_range` is exposed on both Linux and Android (bionic
+// since API 28). We use the `libc` crate because its declarations ship
+// a proper `#[link(name = "c")]` attribute that propagates to the final
+// binary's link line — a bare `extern "C"` block inside a library
+// crate does NOT carry that link flag through to downstream binaries.
 #[cfg(any(target_os = "linux", target_os = "android"))]
-#[link(name = "c")]
-unsafe extern "C" {
-    #[link_name = "copy_file_range"]
-    fn libc_copy_file_range(
-        srcfd: i32,
-        src_off: *mut i64,
-        dstfd: i32,
-        dst_off: *mut i64,
-        len: usize,
-        flags: u32,
-    ) -> isize;
+fn linux_android_copy_file_range(
+    srcfd: i32,
+    src_off: i64,
+    dstfd: i32,
+    dst_off: i64,
+    len: usize,
+) -> isize {
+    // SAFETY: callers below (see try_reflink_copy) ensure both fds are
+    // valid, the offets are either valid pointers or -1 (meaning the
+    // kernel uses/updates the current file position), and `len` is
+    // the upper bound on bytes to copy. The kernel may copy fewer
+    // bytes and return a positive value, or return -1 with errno set.
+    unsafe {
+        libc::syscall(
+            libc::SYS_copy_file_range,
+            srcfd,
+            src_off as *mut i64,
+            dstfd,
+            dst_off as *mut i64,
+            len,
+            0u32,
+        ) as isize
+    }
+}
 
-    // ioctl is variadic in C. We declare an extern wrapper that takes
-    // exactly the two arguments we need (dst fd, src fd).
-    // The actual FICLONE semantics are: ioctl(dst_fd, FICLONE, src_fd).
-    // We forward through a thin C shim implemented in `ficlone_shim.c` —
-    // see `build.rs`. The `unsafe extern "C" { unsafe fn ... }` syntax
-    // (Rust 1.82+) avoids needing an `unsafe { ... }` block at the call site.
+// ioctl is variadic in C. We declare an extern wrapper that takes
+// exactly the two arguments we need (dst fd, src fd).
+// The actual FICLONE semantics are: ioctl(dst_fd, FICLONE, src_fd).
+// We forward through a thin C shim implemented in `ficlone_shim.c` —
+// see `build.rs`. The `unsafe extern "C" { unsafe fn ... }` syntax
+// (Rust 1.82+) avoids needing an `unsafe { ... }` block at the call site.
+#[cfg(any(target_os = "linux", target_os = "android"))]
+unsafe extern "C" {
     unsafe fn fiex_ficlone(dst: i32, src: i32) -> i32;
 }
 
