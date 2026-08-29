@@ -32,7 +32,9 @@ The engine has zero dependencies on `ratatui`, so all of its logic is testable h
 
 ## Build
 
-Builds are CI-driven. Local builds aren't part of the supported workflow (the disk on this host is too tight to fit a `target/` tree for the whole workspace).
+Builds are CI-driven. Local builds aren't part of the supported workflow
+on this host (the disk is too tight to fit a `target/` tree for the
+whole workspace), but the CI workflow checks everything.
 
 ```bash
 # from the repo root, in CI
@@ -40,9 +42,26 @@ just ci         # fmt + clippy + test + build
 # or
 cargo fmt --all -- --check
 cargo clippy --workspace --all-targets --all-features -- -D warnings
-cargo build   --workspace --all-features --locked
-cargo test    --workspace --all-features --locked
+cargo build   --workspace --all-features
+cargo test    --workspace --all-features
 ```
+
+## Releases
+
+Every pushed `v*` tag triggers `.github/workflows/release.yml`, which
+builds the engine, the TUI, and the CLI for three targets, uploads the
+binaries as release artifacts, and publishes a GitHub release with
+SHA-256 sums:
+
+| Target                  | Triple                        | Notes                       |
+| ----------------------- | ----------------------------- | --------------------------- |
+| Linux x86_64            | `x86_64-unknown-linux-gnu`    | host gcc / linker           |
+| Linux arm64             | `aarch64-unknown-linux-gnu`   | `gcc-aarch64-linux-gnu`     |
+| Android arm64           | `aarch64-linux-android`       | NDK r27 clang (no `cargo-ndk`) |
+
+The Android artifact is a standalone ELF executable that runs on any
+Android API 21+ device with bionic — no APK, no JNI. Push it with
+`adb push fiex /data/local/tmp/ && adb shell /data/local/tmp/fiex --version`.
 
 ## Run
 
