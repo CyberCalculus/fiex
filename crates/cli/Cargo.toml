@@ -22,3 +22,8 @@ tracing-subscriber = { workspace = true }
 dirs = { workspace = true }
 # Linear `rich`-style progress bars.
 indicatif = { workspace = true }
+
+[package.metadata.cargo-machete]
+# `tracing` is re-exported by `tracing-subscriber` macros; cargo-machete's
+# simple text scan doesn't see that. The dep is still required at build time.
+ignored = ["tracing"]

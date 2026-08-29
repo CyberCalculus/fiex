@@ -13,7 +13,6 @@ tokio = { workspace = true }
 libc = { workspace = true }
 crossbeam-channel = { workspace = true }
 blake3 = { workspace = true }
-anyhow = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
 xattr = { workspace = true }
@@ -26,3 +25,9 @@ tokio = { workspace = true, features = ["test-util"] }
 
 [build-dependencies]
 cc = "1.2"
+
+[package.metadata.cargo-machete]
+# `tracing` is a transitive peer of the `tracing` ecosystem crates the
+# engine may use in the future; the dep is required at build time
+# even if no `tracing::` macro is used yet.
+ignored = ["tracing"]
