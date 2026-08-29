@@ -323,6 +323,14 @@ impl Engine {
                             destination: entry.destination.clone(),
                             message: e.to_string(),
                         });
+                        // `Cancelled` is a user-initiated abort — propagate
+                        // it to the engine-wide cancel flag so the rest
+                        // of the workers bail out, and the caller sees
+                        // `EngineError::Cancelled` instead of a silent
+                        // "completed with errors" success=false.
+                        if matches!(e, EngineError::Cancelled) {
+                            cancel.store(true, Ordering::SeqCst);
+                        }
                     }
                 }
             });
