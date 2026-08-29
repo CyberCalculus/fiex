@@ -3,10 +3,11 @@
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "kebab-case")]
 pub enum ConflictPolicy {
     /// Always replace the destination.
+    #[default]
     Overwrite,
     /// Keep the destination, leave the source as-is.
     Skip,
@@ -19,17 +20,6 @@ pub enum ConflictPolicy {
     /// otherwise treats it as `Skip` (with a log line) so a piped run
     /// never blocks.
     Prompt,
-}
-
-impl Default for ConflictPolicy {
-    fn default() -> Self {
-        // Default to `Overwrite` so a fresh `Config` and a
-        // serde-loaded `Config` agree: missing keys don't quietly
-        // make the engine a no-op. Users who want a prompt have to
-        // opt in via `--conflict prompt` or the `conflict_policy`
-        // field.
-        Self::Overwrite
-    }
 }
 
 impl ConflictPolicy {
