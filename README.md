@@ -22,10 +22,19 @@
 ## Workspace layout
 
 ```
-crates/
-├── engine/    # transfer logic, events, BLAKE3, reflink, xattrs — no UI deps
-├── tui/       # ratatui frontend — purely reactive on engine events
-└── cli/       # clap parser, headless + TUI runners
+.
+├── .github/workflows/
+│   ├── ci.yml         # fmt + clippy + test, runs on every push
+│   └── release.yml    # cross-build + GitHub release on `v*` tags
+├── crates/
+│   ├── engine/        # transfer logic, events, BLAKE3, reflink, xattrs — no UI deps
+│   │   ├── src/ficlone_shim.c   # C wrapper for the FICLONE ioctl
+│   │   └── build.rs             # compiles ficlone_shim.c via the `cc` crate
+│   ├── tui/           # ratatui frontend — purely reactive on engine events
+│   └── cli/           # clap parser, headless + TUI runners
+├── Cargo.toml         # workspace root, pinned dep versions
+├── justfile           # local recipes (fmt, clippy, test, build, ci)
+└── README.md
 ```
 
 The engine has zero dependencies on `ratatui`, so all of its logic is testable headlessly. The TUI is a pure consumer of the engine's typed `Event` stream.
@@ -66,17 +75,32 @@ Android API 21+ device with bionic — no APK, no JNI. Push it with
 ## Run
 
 ```bash
-# copy a directory interactively
+# copy a directory interactively (TUI)
 fiex /path/to/src /path/to/dst
 
 # move instead of copy
 fiex --move /path/to/src /path/to/dst
 
-# headless: useful in CI
+# headless: useful in CI / scripts (no TUI, events go to stderr)
 fiex --headless /path/to/src /path/to/dst
 
-# full verify after copy
+# full verify after copy (re-hash source and destination)
 fiex --verify all /path/to/src /path/to/dst
+```
+
+### Quick reference
+
+| Flag                    | What it does                                            |
+| ----------------------- | ------------------------------------------------------- |
+| `--move` / `-m`         | Move instead of copy (deletes source on success).     |
+| `--headless`            | Skip the TUI; print engine events to stderr.         |
+| `--conflict <policy>`   | `overwrite` / `skip` / `rename-old` / `rename-new` / `prompt`. |
+| `--symlinks <policy>`   | `preserve` / `follow` / `skip`.                       |
+| `--verify <mode>`       | `none` / `all` / `sample`.                            |
+| `--try-reflink <bool>`  | Enable `copy_file_range` / `FICLONE` (default: true). Pass `--try-reflink=false` to force buffered copy. |
+| `--config <path>`       | Override the config file (TOML).                      |
+| `--parallelism <n>`     | Worker pool size (default = # CPUs).                  |
+| `--buffer-size <bytes>` | Read/write buffer (default 256 KiB).                  |
 
 # write a config
 cat > ~/.config/fiex/config.toml <<'EOF'
