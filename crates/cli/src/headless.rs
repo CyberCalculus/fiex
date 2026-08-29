@@ -79,9 +79,7 @@ pub async fn run(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use fiex_engine::FileOutcome;
-    use std::path::PathBuf;
 
     #[test]
     fn file_outcome_has_all_variants() {
@@ -93,6 +91,5 @@ mod tests {
             FileOutcome::Resumed,
             FileOutcome::Reflinked,
         ];
-        let _: PathBuf = PathBuf::from("/tmp");
     }
 }
