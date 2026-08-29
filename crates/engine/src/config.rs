@@ -114,8 +114,10 @@ mod tests {
 
     #[test]
     fn zero_buffer_is_rejected() {
-        let mut cfg = Config::default();
-        cfg.buffer_size = 0;
+        let cfg = Config {
+            buffer_size: 0,
+            ..Config::default()
+        };
         assert!(cfg.validate().is_err());
     }
 
