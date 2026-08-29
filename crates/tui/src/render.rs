@@ -1,8 +1,10 @@
 //! Pure rendering: takes the app state and draws a frame.
 
+use std::time::Duration;
+
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::Style;
-use ratatui::text::{Line, Span};
+use ratatui::text::{Line, Span, Text};
 use ratatui::widgets::{
     Block, Borders, Clear, Gauge, List, ListItem, ListState, Paragraph, Sparkline,
 };
@@ -62,7 +64,7 @@ fn draw_top_bar(f: &mut Frame, app: &App, area: Rect) {
             Style::default().fg(app.theme.dim),
         ),
     ]);
-    let p = Paragraph::new(Line::from(vec![title, info])).block(
+    let p = Paragraph::new(Text::from(vec![title, info])).block(
         Block::default()
             .borders(Borders::BOTTOM)
             .border_style(Style::default().fg(app.theme.border)),
