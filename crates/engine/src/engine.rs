@@ -143,10 +143,8 @@ impl Engine {
             if let Some(outcome) =
                 try_whole_tree_rename(&sources[0], &dest_root, &self.cancel, &events)
             {
-                let _ = events.send(Event::Done {
-                    success: !matches!(outcome, EngineError::Cancelled),
-                    errors: 0,
-                });
+                let success = !matches!(outcome, Err(EngineError::Cancelled));
+                let _ = events.send(Event::Done { success, errors: 0 });
                 return outcome;
             }
         }
