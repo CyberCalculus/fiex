@@ -30,7 +30,7 @@ struct Cli {
     dest: PathBuf,
 
     /// Move instead of copy.
-    #[arg(short, long)]
+    #[arg(short, long = "move")]
     move_: bool,
 
     /// Skip the TUI and run headlessly. Useful for scripts.

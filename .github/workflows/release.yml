@@ -91,14 +91,13 @@ jobs:
 
       - name: Build (linux gnu)
         if: matrix.target == 'x86_64-unknown-linux-gnu'
-        run: cargo build --release --target x86_64-unknown-linux-gnu --locked
+        run: cargo build --release --target x86_64-unknown-linux-gnu
 
       - name: Build (linux musl arm64)
         if: matrix.target == 'aarch64-unknown-linux-musl'
         run: |
           cargo build --release \
-            --target aarch64-unknown-linux-musl \
-            --locked
+            --target aarch64-unknown-linux-musl
 
       - name: Build (android arm64, no cargo-ndk)
         if: matrix.target == 'aarch64-linux-android'
@@ -119,8 +118,7 @@ jobs:
           command -v clang
           command -v llvm-ar
           cargo build --release \
-            --target aarch64-linux-android \
-            --locked
+            --target aarch64-linux-android
 
       - name: Verify binary
         if: matrix.target != 'aarch64-linux-android'

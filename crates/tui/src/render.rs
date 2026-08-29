@@ -59,12 +59,11 @@ fn draw_top_bar(f: &mut Frame, app: &App, area: Rect) {
             Style::default().fg(app.theme.dim),
         ),
     ]);
-    let p = Paragraph::new(Line::from(vec![title, info]))
-        .block(
-            Block::default()
-                .borders(Borders::BOTTOM)
-                .border_style(Style::default().fg(app.theme.border)),
-        );
+    let p = Paragraph::new(Line::from(vec![title, info])).block(
+        Block::default()
+            .borders(Borders::BOTTOM)
+            .border_style(Style::default().fg(app.theme.border)),
+    );
     f.render_widget(p, area);
 }
 
@@ -88,10 +87,7 @@ fn draw_pane(f: &mut Frame, app: &mut App, focus: PaneFocus, area: Rect) {
     } else {
         app.theme.border
     };
-    let title = format!(
-        " {} ",
-        pane.current_dir.display()
-    );
+    let title = format!(" {} ", pane.current_dir.display());
     let block = Block::default()
         .title(Span::styled(title, Style::default().fg(app.theme.fg)))
         .borders(Borders::ALL)
@@ -113,7 +109,11 @@ fn draw_pane(f: &mut Frame, app: &mut App, focus: PaneFocus, area: Rect) {
                 Span::styled(icon, Style::default().fg(color)),
                 Span::styled(
                     format!("{:<32}", truncate(&e.name, 32)),
-                    Style::default().fg(if selected { app.theme.warn } else { app.theme.fg }),
+                    Style::default().fg(if selected {
+                        app.theme.warn
+                    } else {
+                        app.theme.fg
+                    }),
                 ),
                 Span::styled(
                     if matches!(e.kind, EntryKind::File) {
@@ -290,10 +290,7 @@ fn draw_log(f: &mut Frame, app: &App, area: Rect) {
         })
         .collect();
     let block = Block::default()
-        .title(Span::styled(
-            " Log ",
-            Style::default().fg(app.theme.fg),
-        ))
+        .title(Span::styled(" Log ", Style::default().fg(app.theme.fg)))
         .borders(Borders::ALL)
         .border_style(Style::default().fg(app.theme.border));
     let p = Paragraph::new(lines).block(block);
@@ -328,7 +325,10 @@ fn draw_palette_overlay(f: &mut Frame, app: &App, area: Rect) {
         .style(Style::default().fg(app.theme.fg))
         .block(
             Block::default()
-                .title(Span::styled(" Command Palette ", Style::default().fg(app.theme.accent)))
+                .title(Span::styled(
+                    " Command Palette ",
+                    Style::default().fg(app.theme.accent),
+                ))
                 .borders(Borders::ALL)
                 .border_style(Style::default().fg(app.theme.accent)),
         );
