@@ -538,7 +538,7 @@ mod tests {
         assert_eq!(before_tmp.len(), 3072);
         assert_eq!(&before_tmp[..], &before_src[..3072]);
 
-        let outcome = copy_file(&src, &dst, 4096, true, true).unwrap();
+        let outcome = copy_file(&src, &dst, 4096, false, true).unwrap();
         // We expect Resumed because the .tmp existed on entry.
         assert_eq!(outcome, CopyOutcome::Resumed);
 
@@ -568,7 +568,9 @@ mod tests {
         let tmp = tmp_path(&dst);
         std::fs::write(&tmp, vec![0u8; 1024]).unwrap();
 
-        copy_file(&src, &dst, 4096, true, true).unwrap();
+        // Force a buffered copy so the resume path is exercised on
+        // every filesystem, not just ones where reflink is rejected.
+        copy_file(&src, &dst, 4096, false, true).unwrap();
 
         let after = std::fs::read(&dst).unwrap();
         let src_bytes = std::fs::read(&src).unwrap();
