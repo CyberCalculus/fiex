@@ -288,6 +288,15 @@ impl Engine {
             let _ = h.await;
         }
 
+        // In Move mode, per-file move_file() leaves empty source
+        // directories behind (the workers only touch files). Walk the
+        // source tree bottom-up and remove any directory that is now
+        // empty. Files that the engine couldn't move (errors) are
+        // still inside their parent, so the directory stays.
+        if matches!(mode, TransferMode::Move) {
+            prune_empty_source_dirs(&dirs, &self.cancel);
+        }
+
         let success = errors.load(Ordering::SeqCst) == 0 && !self.cancel.load(Ordering::SeqCst);
         let _ = events.send(Event::Done {
             success,
@@ -304,6 +313,24 @@ impl Engine {
 pub enum TransferMode {
     Copy,
     Move,
+}
+
+/// Walk the source directory entries bottom-up and `remove_dir` each
+/// one that is now empty. Directories that still contain files (e.g.
+/// the move failed for some of their children) are left in place —
+/// `remove_dir` returns ENOTEMPTY in that case and we silently
+/// swallow it.
+fn prune_empty_source_dirs(dirs: &[PlanEntry], cancel: &Arc<AtomicBool>) {
+    let mut sorted: Vec<&PlanEntry> = dirs.iter().collect();
+    // Deepest paths first: longer path = deeper directory. Same-depth
+    // entries are removed in any order — they don't contain each other.
+    sorted.sort_by(|a, b| b.source.as_os_str().len().cmp(&a.source.as_os_str().len()));
+    for d in sorted {
+        if cancel.load(Ordering::SeqCst) {
+            break;
+        }
+        let _ = std::fs::remove_dir(&d.source);
+    }
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -633,5 +660,69 @@ mod tests {
 
         assert!(!src.path().join("a.bin").exists());
         assert!(dst.path().join("a.bin").exists());
+    }
+
+    /// Bug fix regression: a Move run over a nested source tree must
+    /// leave the user with no source files AND no leftover empty
+    /// source directories. Previously per-file `move_file` only
+    /// renamed each file, so `src/sub/` stayed as an empty directory
+    /// after the run.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn move_prunes_empty_source_directories() {
+        let src = tempdir().unwrap();
+        let dst = tempdir().unwrap();
+        // Build a nested source tree.
+        std::fs::create_dir_all(src.path().join("sub/deeper")).unwrap();
+        write_random(&src.path().join("a.bin"), 1024);
+        write_random(&src.path().join("sub/b.bin"), 2048);
+        write_random(&src.path().join("sub/deeper/c.bin"), 512);
+
+        let cfg = Config {
+            buffer_size: 1024,
+            parallelism: 2,
+            verify: crate::config::VerifyMode::All,
+            conflict_policy: crate::policy::ConflictPolicy::Overwrite,
+            try_reflink: false,
+            ..Config::default()
+        };
+        let engine = Engine::new(cfg).unwrap();
+        let (tx, mut rx) = mpsc::unbounded_channel();
+
+        let dst_root = dst.path().to_path_buf();
+        let src_root = src.path().to_path_buf();
+        let h = tokio::spawn(async move {
+            engine
+                .run(vec![src_root.clone()], dst_root, TransferMode::Move, tx)
+                .await
+        });
+
+        while let Some(ev) = rx.recv().await {
+            if matches!(ev, Event::Done { .. }) {
+                break;
+            }
+        }
+        h.await.unwrap().unwrap();
+
+        // No files left anywhere in the source.
+        for p in [
+            src.path().join("a.bin"),
+            src.path().join("sub/b.bin"),
+            src.path().join("sub/deeper/c.bin"),
+        ] {
+            assert!(!p.exists(), "source file should be gone: {p:?}");
+        }
+        // Every source directory is removed too (deepest first,
+        // so each `remove_dir` sees an empty parent).
+        for p in [
+            src.path().join("sub/deeper"),
+            src.path().join("sub"),
+            src.path().join("a.bin").parent().unwrap().to_path_buf(),
+        ] {
+            assert!(!p.exists(), "empty source dir should be pruned: {p:?}");
+        }
+        // The dst tree is intact.
+        assert!(dst.path().join("a.bin").exists());
+        assert!(dst.path().join("sub/b.bin").exists());
+        assert!(dst.path().join("sub/deeper/c.bin").exists());
     }
 }
