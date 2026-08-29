@@ -23,6 +23,9 @@ tracing-subscriber = { workspace = true }
 serde = { workspace = true }
 toml = { workspace = true }
 dirs = { workspace = true }
+# The TUI runner owns the terminal and uses ratatui directly. Features
+# are unified with fiex-tui's, so this is cheap.
+ratatui = { workspace = true }
 # crossterm 0.29 needs the `event-stream` feature for `EventStream`,
 # which the TUI runner uses to bridge sync input into the async loop.
 crossterm = { version = "0.29.0", features = ["event-stream"] }

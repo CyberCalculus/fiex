@@ -7,7 +7,6 @@ use anyhow::{Context, Result};
 use clap::{Parser, ValueHint};
 use fiex_engine::{Config, ConflictPolicy, SymlinkPolicy, VerifyMode};
 
-mod config;
 mod headless;
 mod tui_runner;
 
