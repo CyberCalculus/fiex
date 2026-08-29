@@ -65,7 +65,7 @@ jobs:
         # imported).
         run: |
           cargo install --locked cargo-machete
-          cargo machete --workspace
+          cargo machete
 
   msrv:
     name: MSRV build
