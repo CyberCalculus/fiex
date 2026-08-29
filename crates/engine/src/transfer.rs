@@ -147,9 +147,9 @@ fn same_path(a: &Path, b: &Path) -> bool {
     }
 }
 
-// ---------- reflink (Linux) ----------
+// ---------- reflink (Linux and Android bionic) ----------
 
-#[cfg(target_os = "linux")]
+#[cfg(any(target_os = "linux", target_os = "android"))]
 fn try_reflink_copy(src: &Path, dst: &Path) -> std::io::Result<bool> {
     use std::os::unix::io::AsRawFd;
     let s = File::open(src)?;
@@ -191,21 +191,25 @@ fn try_reflink_copy(src: &Path, dst: &Path) -> std::io::Result<bool> {
     Ok(false)
 }
 
-#[cfg(not(target_os = "linux"))]
+#[cfg(not(any(target_os = "linux", target_os = "android")))]
 fn try_reflink_copy(_src: &Path, _dst: &Path) -> std::io::Result<bool> {
     Ok(false)
 }
 
-#[cfg(target_os = "linux")]
+// `O_NOFOLLOW` and the cross-FS `copy_file_range` / `FICLONE` ioctl are
+// available on every Unix-like target we support (Linux and Android
+// bionic). macOS would need its own set of constants; we don't ship that
+// today but the cfg list is the place to extend.
+#[cfg(unix)]
 const LIBC_O_NOFOLLOW: i32 = 0o400_000;
-#[cfg(target_os = "linux")]
+#[cfg(unix)]
 const LIBC_EXDEV: i32 = 18;
-#[cfg(target_os = "linux")]
+#[cfg(unix)]
 const LIBC_ENOTSUP: i32 = 95;
-#[cfg(target_os = "linux")]
+#[cfg(unix)]
 const LIBC_EINVAL: i32 = 22;
 
-#[cfg(target_os = "linux")]
+#[cfg(any(target_os = "linux", target_os = "android"))]
 unsafe extern "C" {
     #[link_name = "copy_file_range"]
     fn libc_copy_file_range(
@@ -226,7 +230,7 @@ unsafe extern "C" {
     unsafe fn fiex_ficlone(dst: i32, src: i32) -> i32;
 }
 
-#[cfg(target_os = "linux")]
+#[cfg(any(target_os = "linux", target_os = "android"))]
 unsafe fn libc_ficlone(dst: i32, src: i32) -> i32 {
     // SAFETY: caller (the engine) ensures both fds are valid open file
     // descriptors and that the destination is on a filesystem that
