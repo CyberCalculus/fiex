@@ -121,32 +121,29 @@ jobs:
 
       - name: Build (android arm64, no cargo-ndk)
         if: matrix.target == 'aarch64-linux-android'
-        env:
-          # NDK clang is the system C compiler for aarch64-linux-android.
-          # We do NOT use cargo-ndk — cargo's own `--target` machinery
-          # is sufficient for a standalone CLI binary.
-          # `CARGO_TARGET_*_LINKER` must be a single executable name
-          # (no spaces), so we wrap clang in a tiny shell script that
-          # always passes the API-level target. The wrapper also forwards
-          # the right sysroot to ld.lld.
-          CC_aarch64_linux_android: ${RUNNER_TEMP}/aarch64-linux-android21-cc
-          AR_aarch64_linux_android: llvm-ar
-          CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER: ${RUNNER_TEMP}/aarch64-linux-android21-cc
-          CARGO_TARGET_AARCH64_LINUX_ANDROID_AR: llvm-ar
         run: |
           set -euo pipefail
           NDK_TOOL="${ANDROID_NDK_HOME}/toolchains/llvm/prebuilt/linux-x86_64/bin"
           export PATH="${NDK_TOOL}:${PATH}"
           command -v clang
           command -v llvm-ar
-          # Tiny wrapper so cargo can invoke a single binary name as the
-          # linker, but still get the API-level --target on every
-          # invocation (compile + link).
-          cat > "${RUNNER_TEMP}/aarch64-linux-android21-cc" <<'EOF'
+          # `CARGO_TARGET_*_LINKER` must be a single executable name
+          # (no spaces). Wrap clang in a tiny shell script so the
+          # API-level --target gets injected on every invocation.
+          # We use a fixed /opt path because GitHub Actions doesn't
+          # expand ${RUNNER_TEMP} inside the `env:` map.
+          WRAPPER=/opt/aarch64-linux-android21-cc
+          cat > "${WRAPPER}" <<'EOF'
           #!/usr/bin/env bash
           exec clang --target=aarch64-linux-android21 "$@"
           EOF
-          chmod +x "${RUNNER_TEMP}/aarch64-linux-android21-cc"
+          sudo mkdir -p /opt
+          sudo mv "${WRAPPER}" /opt/
+          sudo chmod +x /opt/aarch64-linux-android21-cc
+          export CC_aarch64_linux_android=/opt/aarch64-linux-android21-cc
+          export CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER=/opt/aarch64-linux-android21-cc
+          export AR_aarch64_linux_android=llvm-ar
+          export CARGO_TARGET_AARCH64_LINUX_ANDROID_AR=llvm-ar
           cargo build --release \
             --target aarch64-linux-android
 
