@@ -163,8 +163,18 @@ fn buffered_copy(
     verify: bool,
     on_progress: ProgressFn<'_>,
 ) -> std::io::Result<(u64, Option<String>, Option<String>)> {
-    let src_size = fs::metadata(src)?.len();
+    let src_size = match fs::metadata(src) {
+        Ok(m) => m.len(),
+        Err(e) => {
+            eprintln!("DBG: metadata(src={:?}) failed: {e}", src);
+            return Err(e);
+        }
+    };
     let existing = fs::metadata(dst).ok().map(|m| m.len());
+    eprintln!(
+        "DBG: buffered_copy src={:?} dst={:?} src_size={} existing={:?}",
+        src, dst, src_size, existing
+    );
 
     // Bug 2: byte-compare the kept prefix against the start of the
     // source. If the prefix doesn't match, throw it away and restart.
@@ -553,17 +563,16 @@ mod tests {
     /// from zero, not produce a corrupted file.
     #[test]
     fn resume_discards_corrupt_tmp_and_restarts() {
+        // Avoid the auto-cleanup race in some filesystems by holding
+        // the source bytes in memory and writing them to a fresh
+        // tempdir manually.
         let dir = tempdir().unwrap();
-        let src = dir.path().join("a");
-        let dst = dir.path().join("b");
+        let dir_path = dir.path().to_path_buf();
+        let src = dir_path.join("a");
+        let dst = dir_path.join("b");
         // Source is a known pattern.
         let pattern: Vec<u8> = (0..=255u8).collect();
-        {
-            let mut f = File::create(&src).unwrap();
-            for _ in 0..32 {
-                f.write_all(&pattern).unwrap();
-            }
-        }
+        std::fs::write(&src, pattern.repeat(32)).unwrap();
         // .tmp is a CORRUPT prefix — different bytes from the source.
         let tmp = tmp_path(&dst);
         std::fs::write(&tmp, vec![0u8; 1024]).unwrap();
