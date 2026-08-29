@@ -483,7 +483,7 @@ mod tests {
             buffer_size: 4096,
             parallelism: 2,
             verify: crate::config::VerifyMode::All,
-            conflict_policy: fiex_engine::ConflictPolicy::Overwrite,
+            conflict_policy: crate::policy::ConflictPolicy::Overwrite,
             ..Config::default()
         };
         let engine = Engine::new(cfg).unwrap();
@@ -536,7 +536,7 @@ mod tests {
         let cfg = Config {
             buffer_size: 1024,
             parallelism: 1,
-            conflict_policy: fiex_engine::ConflictPolicy::Overwrite,
+            conflict_policy: crate::policy::ConflictPolicy::Overwrite,
             ..Config::default()
         };
         let engine = Engine::new(cfg).unwrap();
