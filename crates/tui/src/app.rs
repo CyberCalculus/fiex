@@ -96,11 +96,8 @@ impl App {
     }
 
     pub fn apply_event(&mut self, ev: fiex_engine::Event) {
-        match &ev {
-            fiex_engine::Event::Log { level, message } => {
-                self.push_log(*level, message.clone());
-            }
-            _ => {}
+        if let fiex_engine::Event::Log { level, message } = &ev {
+            self.push_log(*level, message.clone());
         }
         self.dashboard.apply(&ev);
         self.dirty = true;
