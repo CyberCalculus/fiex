@@ -210,6 +210,7 @@ const LIBC_ENOTSUP: i32 = 95;
 const LIBC_EINVAL: i32 = 22;
 
 #[cfg(any(target_os = "linux", target_os = "android"))]
+#[link(name = "c")]
 unsafe extern "C" {
     #[link_name = "copy_file_range"]
     fn libc_copy_file_range(
