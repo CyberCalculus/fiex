@@ -125,11 +125,13 @@ jobs:
           # NDK clang is the system C compiler for aarch64-linux-android.
           # We do NOT use cargo-ndk — cargo's own `--target` machinery
           # is sufficient for a standalone CLI binary.
-          # Pin the API level so the NDK clang picks the right sysroot
-          # and the standard Android libs (liblog, libc, etc.) resolve.
-          CC_aarch64_linux_android: clang --target=aarch64-linux-android21
+          # `CARGO_TARGET_*_LINKER` must be a single executable name
+          # (no spaces), so we wrap clang in a tiny shell script that
+          # always passes the API-level target. The wrapper also forwards
+          # the right sysroot to ld.lld.
+          CC_aarch64_linux_android: ${RUNNER_TEMP}/aarch64-linux-android21-cc
           AR_aarch64_linux_android: llvm-ar
-          CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER: clang --target=aarch64-linux-android21
+          CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER: ${RUNNER_TEMP}/aarch64-linux-android21-cc
           CARGO_TARGET_AARCH64_LINUX_ANDROID_AR: llvm-ar
         run: |
           set -euo pipefail
@@ -137,6 +139,14 @@ jobs:
           export PATH="${NDK_TOOL}:${PATH}"
           command -v clang
           command -v llvm-ar
+          # Tiny wrapper so cargo can invoke a single binary name as the
+          # linker, but still get the API-level --target on every
+          # invocation (compile + link).
+          cat > "${RUNNER_TEMP}/aarch64-linux-android21-cc" <<'EOF'
+          #!/usr/bin/env bash
+          exec clang --target=aarch64-linux-android21 "$@"
+          EOF
+          chmod +x "${RUNNER_TEMP}/aarch64-linux-android21-cc"
           cargo build --release \
             --target aarch64-linux-android
 
