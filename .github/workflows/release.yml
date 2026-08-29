@@ -26,7 +26,7 @@ jobs:
             os: ubuntu-latest
             artifact: fiex-linux-amd64
             archive_name: fiex-linux-amd64
-          - target: aarch64-unknown-linux-musl
+          - target: aarch64-unknown-linux-gnu
             os: ubuntu-latest
             artifact: fiex-linux-arm64
             archive_name: fiex-linux-arm64
@@ -56,32 +56,17 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y build-essential pkg-config
 
-      - name: Install musl cross toolchain
-        if: matrix.target == 'aarch64-unknown-linux-musl'
+      - name: Install Linux arm64 cross toolchain
+        if: matrix.target == 'aarch64-unknown-linux-gnu'
         run: |
           sudo apt-get update
-          sudo apt-get install -y musl-tools
-          # The musl-tools package only ships the x86_64 compiler; for
-          # aarch64 we need a cross toolchain. Pull a prebuilt one from
-          # musl.cc which is what Rust's own CI uses.
-          ARCH=aarch64
-          VER=14.2.1
-          INSTALL_DIR=/opt/musl-cross
-          if [ ! -d "${INSTALL_DIR}/${ARCH}-linux-musl" ]; then
-            URL="https://musl.cc/${ARCH}-linux-musl-cross-${VER}.tgz"
-            echo "Downloading ${URL}"
-            curl -fSL --retry 3 -o "${RUNNER_TEMP}/musl-cross.tgz" "${URL}"
-            sudo mkdir -p "${INSTALL_DIR}"
-            sudo tar -C "${INSTALL_DIR}" -xzf "${RUNNER_TEMP}/musl-cross.tgz"
-          fi
-          export PATH="${INSTALL_DIR}/${ARCH}-linux-musl/bin:${PATH}"
-          echo "PATH=${INSTALL_DIR}/${ARCH}-linux-musl/bin:${PATH}" >> "${GITHUB_ENV}"
-          command -v "${ARCH}-linux-musl-gcc"
-          rustup target add aarch64-unknown-linux-musl
-          # Tell cargo to use the cross C compiler for the FICLONE shim
-          # and for any C dep (e.g. blake3) that wants to build native code.
-          echo "CC_aarch64_unknown_linux_musl=${ARCH}-linux-musl-gcc" >> "${GITHUB_ENV}"
-          echo "AR_aarch64_unknown_linux_musl=${ARCH}-linux-musl-ar" >> "${GITHUB_ENV}"
+          sudo apt-get install -y gcc-aarch64-linux-gnu
+          rustup target add aarch64-unknown-linux-gnu
+          # Cargo's cc crate will look for aarch64-linux-gnu-gcc when
+          # building the FICLONE shim for this target.
+          echo "CC_aarch64_unknown_linux_gnu=aarch64-linux-gnu-gcc" >> "${GITHUB_ENV}"
+          echo "AR_aarch64_unknown_linux_gnu=aarch64-linux-gnu-ar" >> "${GITHUB_ENV}"
+          command -v aarch64-linux-gnu-gcc
 
       - name: Install Android NDK r27 (no cargo-ndk)
         if: matrix.target == 'aarch64-linux-android'
@@ -113,11 +98,11 @@ jobs:
         if: matrix.target == 'x86_64-unknown-linux-gnu'
         run: cargo build --release --target x86_64-unknown-linux-gnu
 
-      - name: Build (linux musl arm64)
-        if: matrix.target == 'aarch64-unknown-linux-musl'
+      - name: Build (linux gnu arm64)
+        if: matrix.target == 'aarch64-unknown-linux-gnu'
         run: |
           cargo build --release \
-            --target aarch64-unknown-linux-musl
+            --target aarch64-unknown-linux-gnu
 
       - name: Build (android arm64, no cargo-ndk)
         if: matrix.target == 'aarch64-linux-android'
