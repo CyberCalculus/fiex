@@ -119,7 +119,7 @@ fn scan_recursive(
                 let resolved = resolve_under(abs.parent().unwrap_or(abs), &target);
                 if opts.forbid_symlink_escape {
                     if let Ok(canon_target) = std::fs::canonicalize(&resolved) {
-                        if !canon_target.starts_with(&opts.root) {
+                        if !canon_target.starts_with(opts.root.as_path()) {
                             // Skip the link — escape detected.
                             return Ok(());
                         }
@@ -200,7 +200,10 @@ mod tests {
 
         let root = Arc::new(dir.path().to_path_buf());
         let (tx, rx) = channel(16);
-        let opts = ScanOptions::new(root);
+        let opts = ScanOptions {
+            root: root.clone(),
+            ..ScanOptions::default()
+        };
 
         let h = std::thread::spawn(move || scan_tree(root, opts, tx));
 

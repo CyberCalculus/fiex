@@ -11,7 +11,7 @@ use std::io::{Read, Write};
 
 use blake3::Hasher;
 
-const CHUNK: usize = 64 * 1024;
+pub const CHUNK: usize = 64 * 1024;
 
 /// Hash a reader end-to-end and return the lowercase hex digest.
 pub fn hash_reader<R: Read>(mut reader: R) -> std::io::Result<String> {
