@@ -105,15 +105,16 @@ extern "C" {
 pub fn copy_xattrs(src: &Path, dst: &Path) -> std::io::Result<usize> {
     let names = match xattr::list(src) {
         Ok(it) => it,
-        Err(e) if e.raw_os_error() == Some(libc_ENODATA) => return Ok(0),
+        Err(e) if e.raw_os_error() == Some(LIBC_ENODATA) => return Ok(0),
         Err(e) => return Err(e),
     };
     let mut count = 0;
     for name in names {
         // xattr's public API takes `AsRef<OsStr>` for the attribute name.
-        // `OsStrExt::from_bytes` is unsafe but well-defined for raw OS bytes
-        // (which is what `OsString::as_encoded_bytes` already returned).
-        let name_os = unsafe { std::ffi::OsStr::from_bytes(name.as_encoded_bytes()) };
+        // `OsStrExt::from_bytes` is well-defined for raw OS bytes (which
+        // is what `OsString::as_encoded_bytes` already returned).
+        let name_os =
+            std::os::unix::ffi::OsStrExt::from_bytes(name.as_encoded_bytes());
         let value = match xattr::get(src, name_os) {
             Ok(Some(v)) => v,
             Ok(None) => continue,
@@ -132,7 +133,7 @@ pub fn copy_xattrs(_src: &Path, _dst: &Path) -> std::io::Result<usize> {
 }
 
 #[cfg(target_os = "linux")]
-const libc_ENODATA: i32 = 61;
+const LIBC_ENODATA: i32 = 61;
 
 #[cfg(test)]
 mod tests {

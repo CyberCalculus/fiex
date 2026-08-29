@@ -43,21 +43,16 @@ pub struct Config {
 }
 
 /// When to run a BLAKE3 verification pass.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "kebab-case")]
 pub enum VerifyMode {
     /// Never run an extra verification pass beyond the streaming one.
     None,
     /// Verify every file after the copy completes.
+    #[default]
     All,
     /// Verify a random sample of files (pct is 0-100).
     Sample,
-}
-
-impl Default for VerifyMode {
-    fn default() -> Self {
-        Self::All
-    }
 }
 
 impl Default for Config {

@@ -3,7 +3,7 @@
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "kebab-case")]
 pub enum ConflictPolicy {
     /// Always replace the destination.
@@ -17,13 +17,8 @@ pub enum ConflictPolicy {
     RenameNew,
     /// Ask the user. In headless mode this is treated as `Skip` with a log
     /// line; the TUI handles the real prompts.
+    #[default]
     Prompt,
-}
-
-impl Default for ConflictPolicy {
-    fn default() -> Self {
-        Self::Prompt
-    }
 }
 
 impl ConflictPolicy {
@@ -88,21 +83,16 @@ pub fn unique_path(dst: &Path) -> std::path::PathBuf {
     parent.join(format!("{stem}.fiex-exhausted"))
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "kebab-case")]
 pub enum SymlinkPolicy {
     /// Re-create the symlink at the destination.
+    #[default]
     Preserve,
     /// Replace the symlink with the file/dir it points to.
     Follow,
     /// Skip symlinks entirely.
     Skip,
-}
-
-impl Default for SymlinkPolicy {
-    fn default() -> Self {
-        Self::Preserve
-    }
 }
 
 #[cfg(test)]

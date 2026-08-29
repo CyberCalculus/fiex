@@ -78,7 +78,7 @@ pub fn copy_file(
             .write(true)
             .create_new(true)
             .mode(0o644)
-            .custom_flags(libc_O_NOFOLLOW)
+            .custom_flags(LIBC_O_NOFOLLOW)
             .open(&tmp)
             .map_err(|e| EngineError::io(&tmp, e))?;
         drop(f);
@@ -175,9 +175,9 @@ fn try_reflink_copy(src: &Path, dst: &Path) -> std::io::Result<bool> {
         return Ok(true);
     }
     let err = std::io::Error::last_os_error();
-    if err.raw_os_error() != Some(libc_EXDEV)
-        && err.raw_os_error() != Some(libc_ENOTSUP)
-        && err.raw_os_error() != Some(libc_EINVAL)
+    if err.raw_os_error() != Some(LIBC_EXDEV)
+        && err.raw_os_error() != Some(LIBC_ENOTSUP)
+        && err.raw_os_error() != Some(LIBC_EINVAL)
     {
         return Err(err);
     }
@@ -197,13 +197,13 @@ fn try_reflink_copy(_src: &Path, _dst: &Path) -> std::io::Result<bool> {
 }
 
 #[cfg(target_os = "linux")]
-const libc_O_NOFOLLOW: i32 = 0o400_000;
+const LIBC_O_NOFOLLOW: i32 = 0o400_000;
 #[cfg(target_os = "linux")]
-const libc_EXDEV: i32 = 18;
+const LIBC_EXDEV: i32 = 18;
 #[cfg(target_os = "linux")]
-const libc_ENOTSUP: i32 = 95;
+const LIBC_ENOTSUP: i32 = 95;
 #[cfg(target_os = "linux")]
-const libc_EINVAL: i32 = 22;
+const LIBC_EINVAL: i32 = 22;
 
 #[cfg(target_os = "linux")]
 unsafe extern "C" {
@@ -229,7 +229,7 @@ unsafe extern "C" {
 #[cfg(target_os = "linux")]
 unsafe fn libc_ficlone(dst: i32, src: i32) -> i32 {
     // SAFETY: caller (FIE) ensures both fds are valid open file descriptors.
-    unsafe { fiex_ficlone(dst, src) }
+    fiex_ficlone(dst, src)
 }
 
 // ---------- Move ----------

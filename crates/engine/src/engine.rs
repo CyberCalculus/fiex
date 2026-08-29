@@ -48,7 +48,7 @@ impl Plan {
 }
 
 /// A handle to a running engine. Drop it to request cancellation.
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct EngineHandle {
     cancel: Arc<AtomicBool>,
 }
@@ -63,6 +63,7 @@ impl EngineHandle {
 }
 
 /// The engine.
+#[derive(Debug)]
 pub struct Engine {
     config: Config,
     cancel: Arc<AtomicBool>,
@@ -292,6 +293,7 @@ pub enum TransferMode {
     Move,
 }
 
+#[allow(clippy::too_many_arguments)]
 fn process_file(
     entry: &PlanEntry,
     mode: TransferMode,
