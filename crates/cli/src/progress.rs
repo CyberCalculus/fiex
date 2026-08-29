@@ -337,13 +337,16 @@ fn outcome_verb(o: FileOutcome) -> &'static str {
 /// `--conflict prompt` is set on a TTY. Reads a single line of
 /// input per conflict and returns a [`fiex_engine::PromptDecision`].
 ///
-/// Behavior:
-/// - Empty input or "n" / "no" → Skip this file
-/// - "y" / "yes"              → Overwrite
-/// - "a" / "all"              → Overwrite this one AND every
-///                              remaining prompt in the run
-/// - "q" / "quit"             → Cancel the run
-/// - Anything else            → re-ask
+/// Recognized answers:
+/// - `y` / `yes` — overwrite this file
+/// - `n` / `no` — skip this file
+/// - `a` / `all` — overwrite this and every remaining prompt
+/// - `q` / `quit` — cancel the run
+///
+/// An empty line defaults to "no"; an unknown line re-prompts.
+/// EOF on the very first read (e.g. Ctrl-D on an empty stdin) is
+/// treated as "quit" so a closed stdin doesn't leave workers
+/// blocked.
 ///
 /// Multiple worker threads can hit this concurrently. A `Mutex<()>`
 /// is held only across the per-call `stdin().lock()` so the
