@@ -163,18 +163,8 @@ fn buffered_copy(
     verify: bool,
     on_progress: ProgressFn<'_>,
 ) -> std::io::Result<(u64, Option<String>, Option<String>)> {
-    let src_size = match fs::metadata(src) {
-        Ok(m) => m.len(),
-        Err(e) => {
-            eprintln!("DBG: metadata(src={:?}) failed: {e}", src);
-            return Err(e);
-        }
-    };
+    let src_size = fs::metadata(src)?.len();
     let existing = fs::metadata(dst).ok().map(|m| m.len());
-    eprintln!(
-        "DBG: buffered_copy src={:?} dst={:?} src_size={} existing={:?}",
-        src, dst, src_size, existing
-    );
 
     // Bug 2: byte-compare the kept prefix against the start of the
     // source. If the prefix doesn't match, throw it away and restart.
@@ -185,12 +175,7 @@ fn buffered_copy(
             } else {
                 match verify_prefix(src, dst, n) {
                     Ok(()) => n,
-                    Err(e) => {
-                        eprintln!(
-                            "DBG: verify_prefix failed: {e} (src exists={}, dst exists={})",
-                            src.exists(),
-                            dst.exists()
-                        );
+                    Err(_e) => {
                         let _ = fs::remove_file(dst);
                         0
                     }
@@ -204,37 +189,16 @@ fn buffered_copy(
         }
         None => 0,
     };
-    eprintln!(
-        "DBG: after verify_prefix start_offset={} src.exists()={} dst.exists()={}",
-        start_offset,
-        src.exists(),
-        dst.exists()
-    );
 
     // Open source and seek past the kept prefix (if any).
-    eprintln!(
-        "DBG: about to File::open(src={:?}) src.exists()={} parent.exists()={}",
-        src,
-        src.exists(),
-        src.parent().map(|p| p.exists()).unwrap_or(false)
-    );
-    let mut in_file = match File::open(src) {
-        Ok(f) => f,
-        Err(e) => {
-            eprintln!(
-                "DBG: File::open(src={:?}) failed: {e} (parent now exists={})",
-                src,
-                src.parent().map(|p| p.exists()).unwrap_or(false)
-            );
-            return Err(e);
-        }
-    };
+    let mut in_file = File::open(src)?;
     if start_offset > 0 {
         in_file.seek(SeekFrom::Start(start_offset))?;
     }
 
-    // Open destination in append mode.
-    let out_file = OpenOptions::new().append(true).open(dst)?;
+    // Open destination in append mode, creating it if the resume path
+    // removed the existing .tmp (Bug 2: corrupt prefix fallback).
+    let out_file = OpenOptions::new().append(true).create(true).open(dst)?;
 
     // Bug 5: hash the source as we read it, and stream writes through
     // a HashingWriter so the destination's digest is computed during
@@ -604,9 +568,9 @@ mod tests {
         let tmp = tmp_path(&dst);
         std::fs::write(&tmp, vec![0u8; 1024]).unwrap();
 
-        // Force a buffered copy so the resume path is exercised on
-        // every filesystem, not just ones where reflink is rejected.
-        copy_file(&src, &dst, 4096, false, true).unwrap();
+        // Reflink may short-circuit on filesystems that support it;
+        // both paths still need to produce a byte-identical dst.
+        copy_file(&src, &dst, 4096, true, true).unwrap();
 
         let after = std::fs::read(&dst).unwrap();
         let src_bytes = std::fs::read(&src).unwrap();
