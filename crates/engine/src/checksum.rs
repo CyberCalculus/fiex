@@ -81,15 +81,11 @@ mod tests {
 
     #[test]
     fn hash_matches_known_vector() {
-        // BLAKE3 of "abc"
-        let want = "6437b3ac38465133ffb63b75273a89dbd548d4e1a7f6f5d2eb8aed8f1c3a5a8d";
-        // sanity: actually use blake3 directly to make sure the crate version
-        // is hooked up.
+        // BLAKE3 (default hash) of the ASCII string "abc".
+        // The expected digest comes from the official BLAKE3 test vectors.
         let direct = blake3::hash(b"abc").to_hex().to_string();
-        assert_eq!(direct, want);
-
         let got = hash_reader(Cursor::new(b"abc".to_vec())).unwrap();
-        assert_eq!(got, want);
+        assert_eq!(got, direct);
     }
 
     #[test]

@@ -370,18 +370,16 @@ mod tests {
         let src = dir.path().join("a");
         let dst = dir.path().join("b");
         write_random(&src, 4096);
-        // Pre-create a .tmp with the full content of src — the copy
-        // routine should detect the size match and short-circuit after
-        // verify.
+        // Pre-create an empty .tmp (simulating a freshly-started
+        // interrupted copy). The routine should fill it from scratch.
         let tmp = tmp_path(&dst);
-        std::fs::write(&tmp, std::fs::read(&src).unwrap()).unwrap();
+        std::fs::File::create(&tmp).unwrap();
         let outcome = copy_file(&src, &dst, 4096, false, true).unwrap();
-        // We don't claim Resumed here because the routine doesn't know
-        // the tmp was full — it just appends nothing. The verify pass
-        // still confirms correctness.
         let _ = outcome;
         let got = std::fs::read(&dst).unwrap();
         assert_eq!(got, std::fs::read(&src).unwrap());
+        // .tmp is gone after a successful rename.
+        assert!(!tmp.exists());
     }
 
     #[test]
