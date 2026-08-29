@@ -345,23 +345,27 @@ fn outcome_verb(o: FileOutcome) -> &'static str {
 /// - "q" / "quit"                → Cancel the run
 /// - Anything else                → re-ask
 ///
-/// Multiple worker threads can hit this concurrently. The first
-/// thing we do is `stdin().lock()`, which serializes them.
+/// Multiple worker threads can hit this concurrently. A `Mutex<()>`
+/// is held only across the per-call `stdin().lock()` so the
+/// `StdinLock` guard (which isn't `Send`) never has to cross
+/// thread boundaries — only the `()` does.
 pub fn interactive_prompt() -> fiex_engine::PromptCallback {
     use fiex_engine::PromptDecision;
     use std::io::{BufRead, Write};
     use std::sync::Mutex;
 
-    // A single Mutex around stdin is enough — there's only one fd,
-    // but locking gives us a stable `MutexGuard` to call
-    // `read_line` on, and it serializes any concurrent workers.
-    let stdin = std::io::stdin();
-    let stdin_lock = Mutex::new(stdin.lock());
+    // A `Mutex<()>` is the serialization point. We lock it, then
+    // take `stdin().lock()` inside, and drop both guards before
+    // returning. The StdinLock is non-Send but it's only ever on
+    // the calling thread, so the `Send + Sync` bound on the
+    // closure is satisfied.
+    let gate = Mutex::new(());
 
     Arc::new(
         move |src: &std::path::Path, dst: &std::path::Path| -> PromptDecision {
-            let mut stdin = stdin_lock.lock().unwrap();
             loop {
+                let _g = gate.lock().unwrap();
+                let mut stdin = std::io::stdin().lock();
                 eprint!(
                     "\nfiex: {} -> {} exists. Overwrite? [y/n/a/q]: ",
                     short_path(src),
