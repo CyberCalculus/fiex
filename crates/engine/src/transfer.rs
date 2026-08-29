@@ -218,11 +218,12 @@ extern "C" {
     ) -> isize;
 
     // ioctl is variadic in C. We declare an extern wrapper that takes
-    // exactly the three arguments we need (fd, request, srcfd as u32).
+    // exactly the two arguments we need (dst fd, src fd).
     // The actual FICLONE semantics are: ioctl(dst_fd, FICLONE, src_fd).
     // We forward through a thin C shim implemented in `ficlone_shim.c` —
-    // see `build.rs`.
-    fn fiex_ficlone(dst: i32, src: i32) -> i32;
+    // see `build.rs`. The `unsafe extern "C" { unsafe fn ... }` syntax
+    // (Rust 1.82+) avoids needing an `unsafe { ... }` block at the call site.
+    unsafe fn fiex_ficlone(dst: i32, src: i32) -> i32;
 }
 
 #[cfg(target_os = "linux")]

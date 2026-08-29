@@ -52,3 +52,12 @@ impl EngineError {
         matches!(self, Self::Cancelled)
     }
 }
+
+impl From<std::io::Error> for EngineError {
+    fn from(e: std::io::Error) -> Self {
+        Self::Io {
+            path: PathBuf::from("<unspecified>"),
+            source: e,
+        }
+    }
+}
