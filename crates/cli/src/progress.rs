@@ -56,6 +56,7 @@ impl Renderer {
         Self {
             is_tty,
             last_tick: Instant::now() - PROGRESS_THROTTLE,
+            last_printed_bytes: 0,
             multi,
             overall: None,
             current: None,
@@ -194,12 +195,6 @@ impl Renderer {
                     self.errors = self.errors.max(errors);
                 }
             }
-            // These events predate the per-file start/end model; treat
-            // them as informational. (We still keep the engine emitting
-            // them for backward compatibility, but the renderer doesn't
-            // surface them — the per-file FileStarted/FileCompleted pair
-            // is the source of truth.)
-            _ => {}
         }
     }
 
@@ -212,22 +207,20 @@ impl Renderer {
                     "{}/{} files  {}  {:.1} MB/s",
                     p.files_done,
                     p.files_total,
-                    p.eta.map(HumanDuration::to_string).unwrap_or_default(),
+                    p.eta
+                        .map(|d| HumanDuration(d).to_string())
+                        .unwrap_or_default(),
                     speed / 1_000_000.0
                 ));
             } else {
                 pb.set_message(format!("{}/{} files", p.files_done, p.files_total));
             }
         }
-        if let (Some(cur), Some(name), Some(written), Some(total)) = (
-            &self.current,
-            p.current_file.as_ref(),
-            p.current_file_written,
-            p.current_file_total,
-        ) {
+        if let (Some(cur), Some(written), Some(total)) =
+            (&self.current, p.current_file_written, p.current_file_total)
+        {
             cur.set_position(written);
             cur.set_message(format!("{} / {}", HumanBytes(written), HumanBytes(total)));
-            let _ = name;
         }
     }
 
@@ -280,19 +273,14 @@ impl Renderer {
             FileOutcome::Resumed => "↻",
             FileOutcome::Reflinked => "⧉",
         };
-        let speed = if elapsed.as_secs_f64() > 0.0 {
-            (bytes as f64 / elapsed.as_secs_f64()) / 1_000_000.0
-        } else {
-            0.0
-        };
         let line = format!(
-            "  {mark} {}  {}  in {} ({:.1} MB/s)",
+            "  {mark} {}  {}  in {}",
             short_path(source),
             outcome_verb(outcome),
             short_path(destination),
             HumanDuration(elapsed),
-            speed
         );
+        let _ = bytes;
         if let Some(pb) = &self.overall {
             pb.println(line);
         } else {

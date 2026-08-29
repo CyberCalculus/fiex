@@ -15,8 +15,8 @@ pub enum ConflictPolicy {
     RenameOld,
     /// Pick a unique name with a numeric suffix (e.g. `file (1).bin`).
     RenameNew,
-    /// Ask the user. In headless mode this is treated as `Skip` with a log
-    /// line; the TUI handles the real prompts.
+    /// Ask the user. The CLI's non-interactive runner treats this as `Skip`
+    /// with a log line so the run never blocks on stdin.
     #[default]
     Prompt,
 }

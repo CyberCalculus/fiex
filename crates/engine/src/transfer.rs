@@ -508,6 +508,7 @@ mod tests {
     ///   - verify the kept prefix matches the start of the source
     ///   - seek the source past the kept bytes
     ///   - append only the remaining suffix
+    ///
     /// The previous (broken) implementation opened the destination in
     /// append mode and streamed the whole source from byte 0, producing
     /// an oversized, corrupted file.

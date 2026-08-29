@@ -1,13 +1,14 @@
-//! The actual run path. There is no separate "TUI" code path any more —
-//! the engine emits typed `Event`s and `progress::Renderer` turns them
-//! into linear output. This module is just the wiring: build the engine,
-//! handle Ctrl-c, drive the renderer, and return an exit code.
+//! The actual run path. The engine emits typed `Event`s and
+//! `progress::Renderer` turns them into linear output. This module is just
+//! the wiring: build the engine, handle Ctrl-c, drive the renderer, and
+//! return an exit code.
 
+use std::io::IsTerminal;
 use std::path::PathBuf;
 use std::sync::Arc;
 
 use anyhow::Result;
-use fiex_engine::{Config, ConflictPolicy, Engine, Event, FileOutcome, TransferMode};
+use fiex_engine::{Config, ConflictPolicy, Engine, Event, TransferMode};
 use tokio::sync::mpsc;
 
 use crate::progress::{install_ctrl_c_handler, Renderer};
@@ -79,6 +80,7 @@ pub async fn run(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use fiex_engine::FileOutcome;
     use std::path::PathBuf;
 
     #[test]

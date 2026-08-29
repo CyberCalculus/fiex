@@ -69,7 +69,7 @@ impl ScanOptions {
 
 /// Produce scanned items on `tx` until the tree is exhausted, then drop `tx`.
 ///
-/// Designed to be spawned on a rayon thread so the consumer (the engine)
+/// Designed to be spawned on a worker thread so the consumer (the engine)
 /// can pull items in parallel.
 pub fn scan_tree(root: Arc<PathBuf>, opts: ScanOptions, tx: Sender<EngineResult<ScannedItem>>) {
     let res = scan_recursive(&root, Path::new(""), &opts, &tx);

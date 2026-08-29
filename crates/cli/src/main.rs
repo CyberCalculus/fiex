@@ -1,8 +1,7 @@
 //! `fiex` CLI — top-level entry point. Parses args, loads config, runs
-//! the engine. There is no longer a separate "TUI mode" — the renderer
-//! is the same linear `rich`-style output on every terminal, and falls
-//! back to plain log lines when stdout/stderr isn't a TTY or `NO_COLOR`
-//! is set.
+//! the engine. The renderer emits the same linear `rich`-style output on
+//! every terminal and falls back to plain log lines when stderr isn't a
+//! TTY or `NO_COLOR` is set.
 
 use std::path::PathBuf;
 use std::process::ExitCode;

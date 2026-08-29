@@ -1,7 +1,7 @@
-//! Typed events emitted by the engine over the TUI channel.
+//! Typed events emitted by the engine over the event channel.
 //!
-//! These are the only thing the TUI ever sees from the engine — the renderer
-//! stays purely reactive.
+//! These are the only thing the CLI's progress renderer ever sees from the
+//! engine — the renderer stays purely reactive.
 
 use std::path::PathBuf;
 use std::time::Duration;
@@ -62,7 +62,7 @@ impl Progress {
     }
 }
 
-/// The full event enum the engine pushes to the TUI.
+/// The full event enum the engine pushes to the renderer.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum Event {
     /// Engine started, here's how many files / bytes it expects to handle.
@@ -76,8 +76,8 @@ pub enum Event {
         bytes: u64,
     },
 
-    /// Progress tick (bytes_done changed within a file). The TUI coalesces
-    /// these — it does not have to redraw on every one.
+    /// Progress tick (bytes_done changed within a file). The renderer
+    /// coalesces these — it does not have to redraw on every one.
     Progress(Progress),
 
     /// A file finished. `bytes` is the actual size transferred (post-rename

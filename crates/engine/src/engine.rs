@@ -21,7 +21,7 @@ use crate::scan::{scan_tree, ItemKind, ScanOptions, ScannedItem};
 use crate::transfer::{copy_file_with_progress, copy_symlink, move_file, CopyOutcome};
 
 /// A pre-computed list of (source, destination) pairs for the engine to act
-/// on. Useful for tests and for the TUI to preview before kicking off a run.
+/// on. Useful for tests and for callers that want to preview a run.
 #[derive(Debug, Clone)]
 pub struct Plan {
     pub entries: Vec<PlanEntry>,
@@ -194,7 +194,7 @@ impl Engine {
             }
         }
 
-        // Stream files into a crossbeam channel; a rayon pool of N
+        // Stream files into a crossbeam channel; a pool of N
         // workers pulls from it. Bounded channel gives backpressure.
         let (file_tx, file_rx): (Sender<PlanEntry>, Receiver<PlanEntry>) =
             crossbeam_channel::bounded(self.config.parallelism.max(1) * 4);

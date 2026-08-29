@@ -6,7 +6,7 @@ rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 authors.workspace = true
-description = "fiex — fast, secure TUI file mover/copier"
+description = "fiex — fast, secure file mover/copier"
 
 [[bin]]
 name = "fiex"
@@ -19,8 +19,6 @@ tokio = { workspace = true }
 anyhow = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
-serde = { workspace = true }
-toml = { workspace = true }
 dirs = { workspace = true }
 # Linear `rich`-style progress bars.
 indicatif = { workspace = true }
