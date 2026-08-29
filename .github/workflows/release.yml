@@ -133,13 +133,12 @@ jobs:
           # We use a fixed /opt path because GitHub Actions doesn't
           # expand ${RUNNER_TEMP} inside the `env:` map.
           WRAPPER=/opt/aarch64-linux-android21-cc
-          cat > "${WRAPPER}" <<'EOF'
+          sudo mkdir -p /opt
+          sudo tee "${WRAPPER}" >/dev/null <<'EOF'
           #!/usr/bin/env bash
           exec clang --target=aarch64-linux-android21 "$@"
           EOF
-          sudo mkdir -p /opt
-          sudo mv "${WRAPPER}" /opt/
-          sudo chmod +x /opt/aarch64-linux-android21-cc
+          sudo chmod +x "${WRAPPER}"
           export CC_aarch64_linux_android=/opt/aarch64-linux-android21-cc
           export CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER=/opt/aarch64-linux-android21-cc
           export AR_aarch64_linux_android=llvm-ar
