@@ -228,7 +228,8 @@ unsafe extern "C" {
 
 #[cfg(target_os = "linux")]
 unsafe fn libc_ficlone(dst: i32, src: i32) -> i32 {
-    fiex_ficlone(dst, src)
+    // SAFETY: caller (FIE) ensures both fds are valid open file descriptors.
+    unsafe { fiex_ficlone(dst, src) }
 }
 
 // ---------- Move ----------

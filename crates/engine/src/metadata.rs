@@ -4,6 +4,7 @@
 //! a partial metadata copy is still a successful file transfer.
 
 use std::fs;
+use std::os::unix::ffi::OsStrExt;
 use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 
@@ -110,7 +111,7 @@ pub fn copy_xattrs(src: &Path, dst: &Path) -> std::io::Result<usize> {
     let mut count = 0;
     for name in names {
         // xattr's public API takes `AsRef<OsStr>` for the attribute name.
-        // `OsStr::from_bytes` is unsafe but well-defined for raw OS bytes
+        // `OsStrExt::from_bytes` is unsafe but well-defined for raw OS bytes
         // (which is what `OsString::as_encoded_bytes` already returned).
         let name_os = unsafe { std::ffi::OsStr::from_bytes(name.as_encoded_bytes()) };
         let value = match xattr::get(src, name_os) {
