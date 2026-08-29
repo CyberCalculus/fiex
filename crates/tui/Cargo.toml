@@ -1,0 +1,22 @@
+[package]
+name = "fiex-tui"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+description = "ratatui-based TUI for fiex — purely reactive on engine events"
+
+[dependencies]
+fiex-engine = { path = "../engine" }
+ratatui = { workspace = true }
+ratatui-crossterm = { workspace = true }
+crossterm = { workspace = true }
+tokio = { workspace = true, features = ["rt", "time", "macros", "sync"] }
+nucleo-matcher = { workspace = true }
+anyhow = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+chrono = { workspace = true }
+serde = { workspace = true }

@@ -1,0 +1,25 @@
+[package]
+name = "fiex"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+description = "fiex — fast, secure TUI file mover/copier"
+
+[[bin]]
+name = "fiex"
+path = "src/main.rs"
+
+[dependencies]
+fiex-engine = { path = "../engine" }
+fiex-tui = { path = "../tui" }
+clap = { workspace = true }
+tokio = { workspace = true }
+anyhow = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+serde = { workspace = true }
+toml = { workspace = true }
+dirs = { workspace = true }

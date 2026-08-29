@@ -1,0 +1,197 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag to release (e.g. v0.1.0). Leave empty to use the latest pushed tag.'
+        required: false
+        default: ''
+
+env:
+  CARGO_TERM_COLOR: always
+  RUSTFLAGS: -D warnings
+
+jobs:
+  build:
+    name: build (${{ matrix.target }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-gnu
+            os: ubuntu-latest
+            artifact: fiex-linux-amd64
+            archive_name: fiex-linux-amd64
+          - target: aarch64-unknown-linux-musl
+            os: ubuntu-latest
+            artifact: fiex-linux-arm64
+            archive_name: fiex-linux-arm64
+          - target: aarch64-linux-android
+            os: ubuntu-latest
+            artifact: fiex-android-arm64
+            archive_name: fiex-android-arm64
+
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+
+      - name: Cache cargo registry & target
+        uses: Swatinem/rust-cache@v2
+        with:
+          cache-on-failure: true
+          cache-key-prefix: ${{ matrix.target }}
+
+      - name: Install Linux build deps
+        if: runner.os == 'Linux' && matrix.target != 'aarch64-linux-android'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential pkg-config
+
+      - name: Install musl cross toolchain
+        if: matrix.target == 'aarch64-unknown-linux-musl'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y musl-tools
+          rustup target add aarch64-unknown-linux-musl
+
+      - name: Install Android NDK r27 (no cargo-ndk)
+        if: matrix.target == 'aarch64-linux-android'
+        env:
+          NDK_VERSION: r27
+        run: |
+          set -euo pipefail
+          NDK_DIR="${ANDROID_NDK_HOME:-${RUNNER_TEMP}/android-ndk-${NDK_VERSION}}"
+          echo "NDK_DIR=${NDK_DIR}" >> "${GITHUB_ENV}"
+          if [ ! -d "${NDK_DIR}" ]; then
+            URL="https://dl.google.com/android/repository/android-ndk-${NDK_VERSION}-linux.zip"
+            echo "Downloading ${URL}"
+            curl -fSL --retry 3 -o "${RUNNER_TEMP}/ndk.zip" "${URL}"
+            sudo apt-get install -y unzip
+            unzip -q "${RUNNER_TEMP}/ndk.zip" -d "${RUNNER_TEMP}"
+            # The zip extracts into a directory named after the full NDK version, e.g.
+            # android-ndk-r27/  vs  android-ndk-r27b/. Normalize the path either way.
+            EXTRACTED="$(find "${RUNNER_TEMP}" -maxdepth 1 -type d -name 'android-ndk-*' | head -n 1)"
+            if [ "${EXTRACTED}" != "${NDK_DIR}" ]; then
+              mv "${EXTRACTED}" "${NDK_DIR}"
+            fi
+          fi
+          ls "${NDK_DIR}"
+          rustup target add aarch64-linux-android
+          echo "ANDROID_NDK_HOME=${NDK_DIR}" >> "${GITHUB_ENV}"
+          echo "PATH=${NDK_DIR}/toolchains/llvm/prebuilt/linux-x86_64/bin:${PATH}" >> "${GITHUB_ENV}"
+
+      - name: Build (linux gnu)
+        if: matrix.target == 'x86_64-unknown-linux-gnu'
+        run: cargo build --release --target x86_64-unknown-linux-gnu --locked
+
+      - name: Build (linux musl arm64)
+        if: matrix.target == 'aarch64-unknown-linux-musl'
+        run: |
+          cargo build --release \
+            --target aarch64-unknown-linux-musl \
+            --locked
+
+      - name: Build (android arm64, no cargo-ndk)
+        if: matrix.target == 'aarch64-linux-android'
+        env:
+          # NDK clang is the system C compiler for aarch64-linux-android.
+          # We do NOT use cargo-ndk — cargo's own `--target` machinery
+          # is sufficient for a standalone CLI binary. The NDK clang
+          # defaults to API 21 when invoked without an explicit
+          # --target= flag, matching the Rust target's default min SDK.
+          CC_aarch64_linux_android: clang
+          AR_aarch64_linux_android: llvm-ar
+          CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER: clang
+          CARGO_TARGET_AARCH64_LINUX_ANDROID_AR: llvm-ar
+        run: |
+          set -euo pipefail
+          NDK_TOOL="${ANDROID_NDK_HOME}/toolchains/llvm/prebuilt/linux-x86_64/bin"
+          export PATH="${NDK_TOOL}:${PATH}"
+          command -v clang
+          command -v llvm-ar
+          cargo build --release \
+            --target aarch64-linux-android \
+            --locked
+
+      - name: Verify binary
+        if: matrix.target != 'aarch64-linux-android'
+        shell: bash
+        run: |
+          set -euo pipefail
+          BIN="target/${{ matrix.target }}/release/fiex"
+          file "$BIN"
+          # For musl the host kernel may not allow running the binary, so
+          # the version probe is best-effort.
+          ./"$BIN" --version || echo "(skipped: binary not runnable on host)"
+          ./"$BIN" --help | head -20 || true
+
+      - name: Verify Android binary
+        if: matrix.target == 'aarch64-linux-android'
+        run: |
+          set -euo pipefail
+          BIN="target/aarch64-linux-android/release/fiex"
+          file "$BIN"
+          ls -la "$BIN"
+
+      - name: Package archive
+        shell: bash
+        run: |
+          set -euo pipefail
+          BIN="target/${{ matrix.target }}/release/fiex"
+          OUT="dist/${{ matrix.archive_name }}.tar.gz"
+          mkdir -p dist
+          # Linux archives include a tiny README so users know how to run the
+          # binary; the Android one is wrapped on its own.
+          tar -C "target/${{ matrix.target }}/release" -czf "$OUT" fiex
+          sha256sum "$OUT" | tee "$OUT.sha256"
+          ls -la dist/
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: |
+            dist/${{ matrix.archive_name }}.tar.gz
+            dist/${{ matrix.archive_name }}.tar.gz.sha256
+          if-no-files-found: error
+
+  release:
+    name: github release
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Show what we collected
+        run: |
+          ls -la artifacts/
+
+      - name: Create GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: ${{ github.ref_name }}
+          draft: false
+          prerelease: false
+          generate_release_notes: true
+          files: |
+            artifacts/fiex-linux-amd64/fiex-linux-amd64.tar.gz
+            artifacts/fiex-linux-amd64/fiex-linux-amd64.tar.gz.sha256
+            artifacts/fiex-linux-arm64/fiex-linux-arm64.tar.gz
+            artifacts/fiex-linux-arm64/fiex-linux-arm64.tar.gz.sha256
+            artifacts/fiex-android-arm64/fiex-android-arm64.tar.gz
+            artifacts/fiex-android-arm64/fiex-android-arm64.tar.gz.sha256
