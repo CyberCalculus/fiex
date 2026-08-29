@@ -24,7 +24,7 @@ pub async fn run(
     force_plain: bool,
 ) -> Result<i32> {
     // 1. Build the engine and wire Ctrl-c to its cancel handle.
-    let engine = Engine::new(cfg)?;
+    let engine = Engine::new(cfg.clone())?;
     let handle = engine.handle();
     install_ctrl_c_handler(Arc::new(handle.clone()));
 
