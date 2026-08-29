@@ -52,10 +52,7 @@ impl Progress {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum Event {
     /// Engine started, here's how many files / bytes it expects to handle.
-    Started {
-        files_total: u64,
-        bytes_total: u64,
-    },
+    Started { files_total: u64, bytes_total: u64 },
 
     /// A file is about to be transferred. Emitted exactly once per file.
     FileStarted {
@@ -90,10 +87,7 @@ pub enum Event {
     },
 
     /// A log line for the status pane.
-    Log {
-        level: LogLevel,
-        message: String,
-    },
+    Log { level: LogLevel, message: String },
 
     /// Engine finished — `success` is false if any non-fatal errors were
     /// collected. `errors` is the count of files that failed.

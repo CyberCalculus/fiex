@@ -15,25 +15,30 @@ pub async fn run(
     let engine = Engine::new(cfg)?;
     let (tx, mut rx) = mpsc::unbounded_channel();
     let dest_clone = dest.clone();
-    let handle = tokio::spawn(async move {
-        engine.run(sources, dest_clone, mode, tx).await
-    });
+    let handle = tokio::spawn(async move { engine.run(sources, dest_clone, mode, tx).await });
 
     while let Some(ev) = rx.recv().await {
         match ev {
-            Event::Started { files_total, bytes_total } => {
-                eprintln!("fiex: starting — {files_total} files, {} bytes",
-                         bytes_total);
-            }
-            Event::FileCompleted { outcome, source, bytes, .. } => {
+            Event::Started {
+                files_total,
+                bytes_total,
+            } => {
                 eprintln!(
-                    "fiex: {:?} {} ({} bytes)",
-                    outcome,
-                    source.display(),
-                    bytes
+                    "fiex: starting — {files_total} files, {} bytes",
+                    bytes_total
                 );
             }
-            Event::FileError { source, message, .. } => {
+            Event::FileCompleted {
+                outcome,
+                source,
+                bytes,
+                ..
+            } => {
+                eprintln!("fiex: {:?} {} ({} bytes)", outcome, source.display(), bytes);
+            }
+            Event::FileError {
+                source, message, ..
+            } => {
                 eprintln!("fiex: error {}: {}", source.display(), message);
             }
             Event::Progress(p) => {

@@ -163,7 +163,11 @@ impl BrowserPane {
     }
 
     #[allow(dead_code)]
-    pub fn fuzzy_filter(&self, pattern: &str, _matcher: &mut nucleo_matcher::Matcher) -> Vec<usize> {
+    pub fn fuzzy_filter(
+        &self,
+        pattern: &str,
+        _matcher: &mut nucleo_matcher::Matcher,
+    ) -> Vec<usize> {
         if pattern.is_empty() {
             return (0..self.entries.len()).collect();
         }
@@ -189,8 +193,6 @@ impl BrowserPane {
     }
 }
 
-
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -206,7 +208,10 @@ mod tests {
         p.refresh();
         // We expect: "..", "sub" (dir), "a.txt" (file) — sorted.
         assert!(p.entries.iter().any(|e| e.name == "a.txt"));
-        assert!(p.entries.iter().any(|e| e.name == "sub" && e.kind == EntryKind::Dir));
+        assert!(p
+            .entries
+            .iter()
+            .any(|e| e.name == "sub" && e.kind == EntryKind::Dir));
     }
 
     #[test]

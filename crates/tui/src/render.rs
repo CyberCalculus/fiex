@@ -19,11 +19,11 @@ pub fn draw(f: &mut Frame, app: &mut App) {
     let outer = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(3),  // top bar
-            Constraint::Min(8),     // browser (dual pane)
-            Constraint::Length(8),  // dashboard
-            Constraint::Min(4),     // log
-            Constraint::Length(1),  // status / hints
+            Constraint::Length(3), // top bar
+            Constraint::Min(8),    // browser (dual pane)
+            Constraint::Length(8), // dashboard
+            Constraint::Min(4),    // log
+            Constraint::Length(1), // status / hints
         ])
         .split(area);
 
@@ -40,7 +40,10 @@ pub fn draw(f: &mut Frame, app: &mut App) {
 
 fn draw_top_bar(f: &mut Frame, app: &App, area: Rect) {
     let title = Line::from(vec![
-        Span::styled(" fiex ", Style::default().bg(app.theme.accent).fg(app.theme.bg)),
+        Span::styled(
+            " fiex ",
+            Style::default().bg(app.theme.accent).fg(app.theme.bg),
+        ),
         Span::styled("  file-exchange ", Style::default().fg(app.theme.dim)),
     ]);
     let mode = match app.mode {

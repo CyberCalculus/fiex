@@ -11,17 +11,24 @@ use crossterm::event::{Event as CtEvent, EventStream, KeyEventKind};
 use fiex_engine::{Config, Event, TransferMode};
 use fiex_tui::{App, Theme};
 use futures::StreamExt;
-use ratatui::Terminal;
 use ratatui::backend::CrosstermBackend;
+use ratatui::Terminal;
 use tokio::sync::mpsc;
 use tokio::time::interval;
 
 pub fn run(cfg: Config, sources: Vec<PathBuf>, dest: PathBuf, mode: TransferMode) -> Result<()> {
-    let rt = tokio::runtime::Builder::new_multi_thread().enable_all().build()?;
+    let rt = tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()?;
     rt.block_on(async move { run_async(cfg, sources, dest, mode).await })
 }
 
-async fn run_async(cfg: Config, sources: Vec<PathBuf>, dest: PathBuf, mode: TransferMode) -> Result<()> {
+async fn run_async(
+    cfg: Config,
+    sources: Vec<PathBuf>,
+    dest: PathBuf,
+    mode: TransferMode,
+) -> Result<()> {
     let theme = Theme::by_name(&cfg.theme);
 
     // Engine event channel.

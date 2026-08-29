@@ -53,11 +53,7 @@ impl Default for ScanOptions {
 ///
 /// Designed to be spawned on a rayon thread so the consumer (the engine)
 /// can pull items in parallel.
-pub fn scan_tree(
-    root: Arc<PathBuf>,
-    opts: ScanOptions,
-    tx: Sender<EngineResult<ScannedItem>>,
-) {
+pub fn scan_tree(root: Arc<PathBuf>, opts: ScanOptions, tx: Sender<EngineResult<ScannedItem>>) {
     let res = scan_recursive(&root, Path::new(""), &opts, &tx);
     if let Err(e) = res {
         let _ = tx.send(Err(e));
@@ -165,7 +161,12 @@ fn resolve_under(base: &Path, target: &Path) -> PathBuf {
 }
 
 /// Convenience: build a bounded channel pair sized for parallel consumers.
-pub fn channel(buffer: usize) -> (Sender<EngineResult<ScannedItem>>, Receiver<EngineResult<ScannedItem>>) {
+pub fn channel(
+    buffer: usize,
+) -> (
+    Sender<EngineResult<ScannedItem>>,
+    Receiver<EngineResult<ScannedItem>>,
+) {
     crossbeam_channel::bounded(buffer)
 }
 

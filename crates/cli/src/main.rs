@@ -106,9 +106,7 @@ fn main() -> Result<()> {
         let rt = tokio::runtime::Builder::new_multi_thread()
             .enable_all()
             .build()?;
-        rt.block_on(async move {
-            headless::run(cfg, cli.sources, cli.dest, mode).await
-        })?;
+        rt.block_on(async move { headless::run(cfg, cli.sources, cli.dest, mode).await })?;
     } else {
         // TUI: own the terminal; tokio runtime inside.
         tui_runner::run(cfg, cli.sources, cli.dest, mode)?;

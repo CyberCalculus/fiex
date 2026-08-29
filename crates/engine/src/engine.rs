@@ -18,9 +18,7 @@ use crate::event::{Event, FileOutcome, LogLevel, Progress};
 use crate::metadata::{copy_xattrs, MetadataSnapshot};
 use crate::policy::{ResolvedTarget, SymlinkPolicy};
 use crate::scan::{scan_tree, ItemKind, ScanOptions, ScannedItem};
-use crate::transfer::{
-    copy_file, copy_symlink, move_file, CopyOutcome,
-};
+use crate::transfer::{copy_file, copy_symlink, move_file, CopyOutcome};
 
 /// A pre-computed list of (source, destination) pairs for the engine to act
 /// on. Useful for tests and for the TUI to preview before kicking off a run.
@@ -304,14 +302,16 @@ fn process_file(
     total_bytes: u64,
     started: Instant,
 ) -> EngineResult<()> {
-    if matches!(cfg.symlink_policy, SymlinkPolicy::Skip)
-        && matches!(entry.kind, ItemKind::Symlink)
+    if matches!(cfg.symlink_policy, SymlinkPolicy::Skip) && matches!(entry.kind, ItemKind::Symlink)
     {
         return Ok(());
     }
 
     // Resolve conflict on the destination.
-    let target = match cfg.conflict_policy.resolve(&entry.source, &entry.destination) {
+    let target = match cfg
+        .conflict_policy
+        .resolve(&entry.source, &entry.destination)
+    {
         ResolvedTarget::Overwrite { target } => target,
         ResolvedTarget::Skip => {
             let _ = events.send(Event::Log {
@@ -333,10 +333,7 @@ fn process_file(
             // this with a real interactive prompt before run.
             let _ = events.send(Event::Log {
                 level: LogLevel::Info,
-                message: format!(
-                    "prompt mode: headless, skipping {}",
-                    destination.display()
-                ),
+                message: format!("prompt mode: headless, skipping {}", destination.display()),
             });
             return Ok(());
         }

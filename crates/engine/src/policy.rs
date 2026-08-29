@@ -143,6 +143,9 @@ mod tests {
     fn conflict_policy_skip_is_skip() {
         let src = PathBuf::from("/a");
         let dst = PathBuf::from("/b");
-        assert_eq!(ConflictPolicy::Skip.resolve(&src, &dst), ResolvedTarget::Skip);
+        assert_eq!(
+            ConflictPolicy::Skip.resolve(&src, &dst),
+            ResolvedTarget::Skip
+        );
     }
 }

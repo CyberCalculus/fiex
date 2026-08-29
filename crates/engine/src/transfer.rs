@@ -160,13 +160,25 @@ fn try_reflink_copy(src: &Path, dst: &Path) -> std::io::Result<bool> {
         .custom_flags(libc_O_NOFOLLOW)
         .open(dst)?;
     // copy_file_range first; if that returns EXDEV / ENOTSUP, try FICLONE.
-    let copied = unsafe { libc_copy_file_range(s.as_raw_fd(), std::ptr::null_mut(), d.as_raw_fd(), std::ptr::null_mut(), usize::MAX, 0) };
+    let copied = unsafe {
+        libc_copy_file_range(
+            s.as_raw_fd(),
+            std::ptr::null_mut(),
+            d.as_raw_fd(),
+            std::ptr::null_mut(),
+            usize::MAX,
+            0,
+        )
+    };
     if copied > 0 {
         d.sync_all()?;
         return Ok(true);
     }
     let err = std::io::Error::last_os_error();
-    if err.raw_os_error() != Some(libc_EXDEV) && err.raw_os_error() != Some(libc_ENOTSUP) && err.raw_os_error() != Some(libc_EINVAL) {
+    if err.raw_os_error() != Some(libc_EXDEV)
+        && err.raw_os_error() != Some(libc_ENOTSUP)
+        && err.raw_os_error() != Some(libc_EINVAL)
+    {
         return Err(err);
     }
     // Try FICLONE ioctl.
@@ -222,7 +234,12 @@ unsafe fn libc_ficlone(dst: i32, src: i32) -> i32 {
 
 /// Move `src` to `dst` by attempting rename first, falling back to copy +
 /// unlink. Returns the actual transfer kind used.
-pub fn move_file(src: &Path, dst: &Path, buf_size: usize, verify: bool) -> EngineResult<CopyOutcome> {
+pub fn move_file(
+    src: &Path,
+    dst: &Path,
+    buf_size: usize,
+    verify: bool,
+) -> EngineResult<CopyOutcome> {
     if same_path(src, dst) {
         return Err(EngineError::SameSourceDest(dst.to_path_buf()));
     }
@@ -301,7 +318,10 @@ mod tests {
         let a = std::fs::read(&src).unwrap();
         let b = std::fs::read(&dst).unwrap();
         assert_eq!(a, b);
-        assert!(!tmp_path(&dst).exists(), "tmp must be cleaned up after rename");
+        assert!(
+            !tmp_path(&dst).exists(),
+            "tmp must be cleaned up after rename"
+        );
     }
 
     #[test]
