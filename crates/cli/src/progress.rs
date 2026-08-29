@@ -338,12 +338,12 @@ fn outcome_verb(o: FileOutcome) -> &'static str {
 /// input per conflict and returns a [`fiex_engine::PromptDecision`].
 ///
 /// Behavior:
-/// - Empty input or "n" / "no"  → Skip this file
-/// - "y" / "yes"                 → Overwrite
-/// - "a" / "all"                 → Overwrite this one AND every
-///                                remaining prompt in the run
-/// - "q" / "quit"                → Cancel the run
-/// - Anything else                → re-ask
+/// - Empty input or "n" / "no" → Skip this file
+/// - "y" / "yes"              → Overwrite
+/// - "a" / "all"              → Overwrite this one AND every
+///                              remaining prompt in the run
+/// - "q" / "quit"             → Cancel the run
+/// - Anything else            → re-ask
 ///
 /// Multiple worker threads can hit this concurrently. A `Mutex<()>`
 /// is held only across the per-call `stdin().lock()` so the
