@@ -3,12 +3,11 @@
 //! the wiring: build the engine, handle Ctrl-c, drive the renderer, and
 //! return an exit code.
 
-use std::io::IsTerminal;
 use std::path::PathBuf;
 use std::sync::Arc;
 
 use anyhow::Result;
-use fiex_engine::{Config, ConflictPolicy, Engine, Event, TransferMode};
+use fiex_engine::{Config, Engine, Event, TransferMode};
 use tokio::sync::mpsc;
 
 use crate::progress::{install_ctrl_c_handler, Renderer};
@@ -23,26 +22,15 @@ pub async fn run(
     mode: TransferMode,
     force_plain: bool,
 ) -> Result<i32> {
-    // 1. If the user picked `Prompt` as the conflict policy on a TTY,
-    //    remind them it's not yet wired up — the engine treats Prompt
-    //    as "skip with a log line" so they'd silently make no progress.
-    if matches!(cfg.conflict_policy, ConflictPolicy::Prompt) && std::io::stdin().is_terminal() {
-        eprintln!(
-            "fiex: conflict-policy=prompt is not yet wired into the runner; \
-             the engine will skip conflicts and log them. Use --conflict \
-             overwrite|skip|rename-old|rename-new for non-interactive use."
-        );
-    }
-
-    // 2. Build the engine and wire Ctrl-c to its cancel handle.
+    // 1. Build the engine and wire Ctrl-c to its cancel handle.
     let engine = Engine::new(cfg)?;
     let handle = engine.handle();
     install_ctrl_c_handler(Arc::new(handle.clone()));
 
-    // 3. Engine events flow into the renderer.
+    // 2. Engine events flow into the renderer.
     let (event_tx, event_rx) = mpsc::unbounded_channel::<Event>();
 
-    // 4. Render task.
+    // 3. Render task.
     let renderer_sources = sources.clone();
     let renderer_dest = dest.clone();
     let renderer = Renderer::new(force_plain);
@@ -52,7 +40,7 @@ pub async fn run(
             .await
     });
 
-    // 5. Engine task.
+    // 4. Engine task.
     let engine_dest = dest.clone();
     let engine_sources = sources.clone();
     let engine_handle = tokio::spawn(async move {
@@ -64,7 +52,7 @@ pub async fn run(
     let engine_result = engine_handle.await?;
     render_task.await??;
 
-    // 6. Translate the engine result into an exit code. Ctrl-c is
+    // 5. Translate the engine result into an exit code. Ctrl-c is
     //    expected (130, conventional SIGINT).
     let errors = match &engine_result {
         Ok(_) => 0,

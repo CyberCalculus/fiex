@@ -101,7 +101,11 @@ impl Default for Config {
         Self {
             buffer_size: 256 * 1024,
             parallelism: num_cpus(),
-            conflict_policy: ConflictPolicy::Prompt,
+            // `Prompt` is a non-interactive skip in this build, so it
+            // would silently no-op most user runs — pick `Overwrite`
+            // as the safe default and let the user opt in to a
+            // non-destructive policy via flag or config.
+            conflict_policy: ConflictPolicy::Overwrite,
             symlink_policy: SymlinkPolicy::Preserve,
             verify: VerifyMode::All,
             preserve_metadata: true,

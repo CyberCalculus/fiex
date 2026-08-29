@@ -17,9 +17,10 @@ the terminal, with a plain log-line fallback for pipes, CI, and `NO_COLOR`.
   of the source. If the kept prefix matches, the copy seeks past it and
   appends only the remaining suffix. If it doesn't match, the temp is
   discarded and the copy restarts from zero.
-- **Conflict policies**: `overwrite`, `skip`, `rename-old`, `rename-new`,
-  `prompt`. `prompt` is non-interactive in this build (logs a skip line and
-  continues); use one of the non-interactive policies in scripts.
+- **Conflict policies**: `overwrite` (default), `skip`, `rename-old`,
+  `rename-new`, `prompt`. `prompt` is non-interactive in this build
+  (logs a skip line and continues); pick a different policy for
+  scripts that need a specific behavior on collision.
 - **Cross-filesystem CoW** via `copy_file_range` (Linux + Android bionic) with
   a `FICLONE` ioctl fallback, then a buffered copy if reflink isn't supported.
 - **Symlink handling**: `preserve`, `follow`, `skip`. With `follow`, symlink
@@ -109,7 +110,7 @@ fiex --help
 | Flag                          | What it does                                            |
 | ----------------------------- | ------------------------------------------------------- |
 | `--move` / `-m`               | Move instead of copy (deletes source on success).     |
-| `--conflict <policy>`         | `overwrite` / `skip` / `rename-old` / `rename-new` / `prompt`. |
+| `--conflict <policy>`         | `overwrite` (default) / `skip` / `rename-old` / `rename-new` / `prompt`. |
 | `--symlinks <policy>`         | `preserve` / `follow` / `skip`.                       |
 | `--verify <mode>`             | `none` / `all` / `sample[=PCT]` (bare `sample` = 10%). |
 | `--try-reflink <bool>`        | Try `copy_file_range` / `FICLONE` first (default `true`). |
@@ -127,7 +128,7 @@ fiex --help
 # ~/.config/fiex/config.toml
 buffer_size = 524288
 parallelism = 8
-conflict_policy = "rename-new"     # overwrite | skip | rename-old | rename-new | prompt
+conflict_policy = "overwrite"      # overwrite | skip | rename-old | rename-new | prompt
 symlink_policy = "preserve"        # preserve | follow | skip
 verify = "all"                     # none | all | sample (or sample=PCT)
 preserve_metadata = true
