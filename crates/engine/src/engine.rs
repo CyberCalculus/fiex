@@ -340,7 +340,7 @@ fn prune_empty_source_dirs(dirs: &[PlanEntry], cancel: &Arc<AtomicBool>) {
     let mut sorted: Vec<&PlanEntry> = dirs.iter().collect();
     // Deepest paths first: longer path = deeper directory. Same-depth
     // entries are removed in any order — they don't contain each other.
-    sorted.sort_by(|a, b| b.source.as_os_str().len().cmp(&a.source.as_os_str().len()));
+    sorted.sort_by_key(|d| std::cmp::Reverse(d.source.as_os_str().len()));
     for d in sorted {
         if cancel.load(Ordering::SeqCst) {
             break;
@@ -474,7 +474,6 @@ fn try_whole_tree_rename(
 /// pairs without re-running the full scanner. Used only by the move
 /// fast-path.
 fn build_simple_plan(canon_src: &Path, final_dest: &Path) -> EngineResult<Plan> {
-    use std::os::unix::fs::MetadataExt;
     let mut entries = Vec::new();
     fn walk(src: &Path, dst: &Path, out: &mut Vec<PlanEntry>) -> EngineResult<()> {
         let md = std::fs::symlink_metadata(src).map_err(|e| EngineError::io(src, e))?;
@@ -912,7 +911,6 @@ mod tests {
     /// (rename preserves them) and the source is gone entirely.
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn move_uses_whole_tree_rename_on_same_fs() {
-        use std::os::unix::fs::MetadataExt;
         let src = tempdir().unwrap();
         let dst = tempdir().unwrap();
         std::fs::create_dir_all(src.path().join("sub")).unwrap();
