@@ -185,7 +185,12 @@ fn buffered_copy(
             } else {
                 match verify_prefix(src, dst, n) {
                     Ok(()) => n,
-                    Err(_e) => {
+                    Err(e) => {
+                        eprintln!(
+                            "DBG: verify_prefix failed: {e} (src exists={}, dst exists={})",
+                            src.exists(),
+                            dst.exists()
+                        );
                         let _ = fs::remove_file(dst);
                         0
                     }
@@ -199,9 +204,25 @@ fn buffered_copy(
         }
         None => 0,
     };
+    eprintln!(
+        "DBG: after verify_prefix start_offset={} src.exists()={} dst.exists()={}",
+        start_offset,
+        src.exists(),
+        dst.exists()
+    );
 
     // Open source and seek past the kept prefix (if any).
-    let mut in_file = File::open(src)?;
+    let mut in_file = match File::open(src) {
+        Ok(f) => f,
+        Err(e) => {
+            eprintln!(
+                "DBG: File::open(src={:?}) failed: {e} (parent exists={})",
+                src,
+                src.parent().map(|p| p.exists()).unwrap_or(false)
+            );
+            return Err(e);
+        }
+    };
     if start_offset > 0 {
         in_file.seek(SeekFrom::Start(start_offset))?;
     }
